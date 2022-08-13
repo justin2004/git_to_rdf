@@ -144,9 +144,35 @@
 ;    put each hunk in its own file
 ;        /path/to/splitpatch/splitpatch.rb -H ../a.patch
 ;    for each file in hunks... 
-;        make json obj?
+;        make clj map and convert to json obj
+
+(do
+  (clojure.java.io/delete-file "a.patch" true)
+  (clojure.java.shell/sh "bash" "-c" "rm -rf hunks")
+  (.mkdir (clojure.java.io/file "hunks"))
+  (doseq [pair (list (first (get-hash-pairs "jj")))]
+    (clojure.java.shell/sh "bash" "-c" (str "git -C jj diff -U0 "
+                                            (first pair)
+                                            " "
+                                            (second pair)
+                                            " > a.patch"))
+    (clojure.java.shell/sh "bash" "-c" "cd /mnt/hunks ; splitpatch -H ../a.patch")
+    (doseq [hunk (filter #(.isFile %) (file-seq (clojure.java.io/file "hunks")))]
+      (clojure.pprint/pprint (raw-hunk->map (.getPath hunk)))
+      )
+  ; CONTINUE HERE
+    (print 'DONE)))
+
+
+; (print (slurp (nth (file-seq (clojure.java.io/file ".")) 
+;      6)))
+
+; (clojure.java.shell/sh "pwd")
+; (clojure.java.shell/sh "bash" "-c" "cd /mnt/jj ; pwd")
+; (file-seq (clojure.java.io/file "/mnt"))
 
 (defn raw-hunk->map [path]
+  "convert a raw-hunk (unified diff) file into a map"
   (let [lines (clojure.string/split-lines (slurp path))
         filename (clojure.string/replace (nth lines 0)
                                          #".* a/"
@@ -158,7 +184,8 @@
                                                      "") 
         deets (clojure.string/split deets-clean-no-signs #" ")
         deets1 (mapv #(clojure.string/split % #",") deets)
-        content (drop-last 2 (drop 3 lines))
+        ; content (drop-last 2 (drop 3 lines))
+        content (drop 3 lines)
         deets-map {:old_source_start_line (first (first deets1))
                    :old_source_line_count (second (first deets1))
                    :new_source_start_line (first (second deets1))
@@ -175,7 +202,13 @@
                 content-seq)))
 
 
+(print (slurp (nth (file-seq (clojure.java.io/file ".")) 
+     6)))
+
+(clojure.pprint/pprint (filter #(.isFile %) (file-seq (clojure.java.io/file "."))))
+
 (clojure.pprint/pprint (raw-hunk->map "/mnt/la"))
+(print (j/write-value-as-string (raw-hunk->map "/mnt/la")))
 
 
 ; thanks to  https://www.clearchain.com/blog/posts/splitting-a-patch
