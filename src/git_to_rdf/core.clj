@@ -134,8 +134,59 @@
 				"-f" "NQ"])))
 
 
-;;;;;;;;;;;;;;;;;;;;;
+;;;;;
+; rm a.patch
+; rm hunks/*
+; for each hash-pair
+;    save patch in file   a.patch
+;         git diff -U0  > a.patch
+;    cd hunks
+;    put each hunk in its own file
+;        /path/to/splitpatch/splitpatch.rb -H ../a.patch
+;    for each file in hunks... 
+;        make json obj?
 
+(defn raw-hunk->map [path]
+  (let [lines (clojure.string/split-lines (slurp path))
+        filename (clojure.string/replace (nth lines 0)
+                                         #".* a/"
+                                         "")
+        deets-raw (nth lines 2)
+        deets-clean (clojure.string/replace deets-raw #".*@@ (.*) @@.*" "$1")
+        deets-clean-no-signs (clojure.string/replace deets-clean
+                                                     #"[+-]"
+                                                     "") 
+        deets (clojure.string/split deets-clean-no-signs #" ")
+        deets1 (mapv #(clojure.string/split % #",") deets)
+        content (drop-last 2 (drop 3 lines))
+        deets-map {:old_source_start_line (first (first deets1))
+                   :old_source_line_count (second (first deets1))
+                   :new_source_start_line (first (second deets1))
+                   :new_source_line_count (second (second deets1))
+                   :old_content (extract-hunk-part \- content)
+                   :new_content (extract-hunk-part \+ content) }
+        ]
+    deets-map))
+
+(defn extract-hunk-part [leading-char content-seq]
+  (mapv #(subs % 1)
+        (filter #(= leading-char
+                    (first (subs % 0 1)))
+                content-seq)))
+
+
+(clojure.pprint/pprint (raw-hunk->map "/mnt/la"))
+
+
+; thanks to  https://www.clearchain.com/blog/posts/splitting-a-patch
+;
+; the first number is the starting line for this hunk in oldfile
+; the second number is the number of original source lines in this hunk (this includes lines marked with “-“)
+; the third number is the starting line for this hunk in newfile
+; the last number is the number of lines after the hunk has been applied.
+(print (raw-hunk->map "/mnt/la"))
+
+;;;;;;;;;;;;;;;;;;;;;
 (def path "jj")
 (clojure.java.io/delete-file "finalout.nq")
 (clojure.java.io/delete-file "finalout_summary.nq")
