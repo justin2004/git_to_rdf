@@ -146,27 +146,34 @@
 ;    for each file in hunks... 
 ;        make clj map and convert to json obj
 
-(do-hunks "fred")
+(doseq [pair (get-hash-pairs "fred")] 
+  (do-hunks "fred" pair ))
+(spit "junk11" (do-hunks "fred" (second (get-hash-pairs "fred"))))
 
-(defn do-hunks [repopath]
-  "TODO probably doesn't handle space in path"
+(defn do-hunks [repopath pair]
+  "TODO probably doesn't handle space in repopath
+  pair -- a commitid pair"
   (do
     (clojure.java.io/delete-file "a.patch" true)
     (clojure.java.shell/sh "bash" "-c" "rm -rf hunks")
     (.mkdir (clojure.java.io/file "hunks"))
-    (doseq [pair (get-hash-pairs repopath)]
-      (clojure.java.shell/sh "bash" "-c" (str "git -C "
-                                              repopath
-                                              " diff -U0 "
-                                              (first pair)
-                                              " "
-                                              (second pair)
-                                              " > a.patch"))
-      (clojure.java.shell/sh "bash" "-c" "cd /mnt/hunks ; splitpatch -H ../a.patch")
-      (doseq [hunk (filter #(.isFile %) (file-seq (clojure.java.io/file "hunks")))]
-        (clojure.pprint/pprint (assoc (raw-hunk->map (.getPath hunk))
-                                      :commit-id (last pair))))
-      (clojure.java.shell/sh "bash" "-c" "rm -rf hunks/*"))))
+    (clojure.java.shell/sh "bash" "-c" (str "git -C "
+                                            repopath
+                                            " diff -U0 "
+                                            (first pair)
+                                            " "
+                                            (second pair)
+                                            " > a.patch"))
+    (clojure.java.shell/sh "bash" "-c" "cd /mnt/hunks ; splitpatch -H ../a.patch")
+    ; (doseq [hunk (filter #(.isFile %) (file-seq (clojure.java.io/file "hunks")))]
+    ;       (clojure.pprint/pprint (assoc (raw-hunk->map (.getPath hunk))
+    ;                                     :commit-id (last pair))))
+    (let  [result (mapv #(assoc (raw-hunk->map (.getPath %))
+                                :commit-id (last pair))
+                        (filter #(.isFile %)
+                                (file-seq (clojure.java.io/file "hunks"))))]
+      (clojure.java.shell/sh "bash" "-c" "rm -rf hunks/*")
+      (j/write-value-as-string result))))
 
 
 
@@ -196,7 +203,7 @@
         deets-clean (clojure.string/replace deets-raw #".*@@ (.*) @@.*" "$1")
         deets-clean-no-signs (clojure.string/replace deets-clean
                                                      #"[+-]"
-                                                     "") 
+                                                     "")
         deets (clojure.string/split deets-clean-no-signs #" ")
         deets1 (mapv #(clojure.string/split % #",") deets)
         ; content (drop-last 2 (drop 3 lines))
@@ -204,13 +211,17 @@
         deets-map {:old_filename old-filename
                    :new_filename new-filename
                    :old_source_start_line (first (first deets1))
-                   :old_source_line_count (second (first deets1))
+                   :old_source_line_count (if (nil? (second (first deets1)))
+                                            1
+                                            (second (first deets1)))
                    :new_source_start_line (first (second deets1))
-                   :new_source_line_count (second (second deets1))
+                   :new_source_line_count (if (nil? (second (second deets1)))
+                                            1
+                                            (second (second deets1)))
                    :old_content (extract-hunk-part \- content)
-                   :new_content (extract-hunk-part \+ content) }
-        ]
+                   :new_content (extract-hunk-part \+ content)}]
     deets-map))
+
 
 (defn extract-hunk-part [leading-char content-seq]
   (mapv #(subs % 1)
@@ -219,13 +230,13 @@
                 content-seq)))
 
 
-(print (slurp (nth (file-seq (clojure.java.io/file ".")) 
-     6)))
+; (print (slurp (nth (file-seq (clojure.java.io/file ".")) 
+;      6)))
 
-(clojure.pprint/pprint (filter #(.isFile %) (file-seq (clojure.java.io/file "."))))
+; (clojure.pprint/pprint (filter #(.isFile %) (file-seq (clojure.java.io/file "."))))
 
-(clojure.pprint/pprint (raw-hunk->map "/mnt/la1"))
-(print (j/write-value-as-string (raw-hunk->map "/mnt/la")))
+; (clojure.pprint/pprint (raw-hunk->map "/mnt/la1"))
+; (print (j/write-value-as-string (raw-hunk->map "/mnt/la")))
 
 
 ; thanks to  https://www.clearchain.com/blog/posts/splitting-a-patch
@@ -264,4 +275,6 @@
             (spit input (get-commit-summary path
                                             (second pair)))
             (run-sa-construct (make-query-for-commit-summary input)
-                              "/mnt/finalout_summary.nq")))))
+                              "/mnt/finalout_summary.nq")
+            (spit input (do-hunks path pair))
+            (run-sa-construct TODO   )))))
