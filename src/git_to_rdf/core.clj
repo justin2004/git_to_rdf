@@ -2,6 +2,12 @@
 (require '[clojure.data.json :as json])
 (require '[clojure.data.csv :as csv])
 (require '[jsonista.core :as j])
+(require '[jsonista.core :as j])
+(require '[progrock.core :as pr])
+
+(def bar (pr/progress-bar 100   ))
+(pr/print (pr/tick bar 8.13))
+(print (pr/render bar))
 
 (defmacro with-txn [dataset & body] 
   `(try
@@ -17,20 +23,38 @@
        (rest csv-data)))
 
 
-(defn get-commit-summary-maps [repo-path]
-  (csv-data->maps
-  (csv/read-csv
-    (:out
-      (clojure.java.shell/sh "bash" "-c" (str "echo 'abbreviated_commit_hash,author_name,author_email,author_date,subject,body' ; "
-                                              "git -C " 
-                                              repo-path
-                                              " --no-pager log --date=local --pretty=%h,%an,%ae,%aI,'%s' "))))))
+
+; get-commit-hash-pairs  repo
+(defn get-commit-hash-pairs [repo-path]
+  (csv-data->maps (csv/read-csv (:out (clojure.java.shell/sh "bash" "-c" (str "echo 'abbreviated_commit_hash' ; "
+                                        "git -C "
+                                        repo-path
+                                        " --no-pager log --date=local --pretty=%h"))))))
+
 
 (defn get-hash-pairs [path]
-  (let [m (get-commit-summary-maps path)]
+  (let [m (get-commit-hash-pairs path)]
     (partition 2 1
                (conj (reverse (map :abbreviated_commit_hash m))
           "4b825dc642cb6eb9a060e54bf8d69288fbee4904"))))
+
+
+(get-hash-pairs "jj")
+
+; TODO use hash/commitid consistently
+
+; get-commit-summary-map  repo hash
+(defn get-commit-summary-maps [repo-path pair]
+  (csv-data->maps
+   (csv/read-csv
+    (:out
+     (clojure.java.shell/sh "bash" "-c" (str "echo 'abbreviated_commit_hash,author_name,author_email,author_date,subject,body' ; "
+                                             "git -C " 
+                                             repo-path
+                                             " --no-pager log --date=local --pretty=%h,%an,%ae,%aI,'%s' "
+                                             "-1 "
+                                             (second pair)))))))
+
 
 (defn get-diff-content [repo-path pair]
   "pair -- pair of commit ids"
@@ -42,11 +66,15 @@
                                           (second pair))))
 
 
+(filter #(= "188c627" (second %))  (get-hash-pairs "sparql.anything"))
+; 188c627
+; (("6e56d40" "188c627")))
 
-(defn get-commit-summary [repo-path commit-id]
+
+(defn get-commit-summary [repo-path pair]
   (json/write-str
-   (first
-     (get-commit-summary-maps repo-path))))
+   (get-commit-summary-maps repo-path
+                             pair)))
 
 
 
@@ -74,7 +102,7 @@
 						?commit dcterms:subject ?subject .
 						?subject dcterms:title ?subject_text .
 						?subject dcterms:description \"TODO body goes here\" .
-						?commit gist:contains ?content . # TODO gist needs this
+						#?commit gist:contains ?content . # TODO gist needs this
 						}
 						WHERE
 						{ SERVICE <x-sparql-anything:>
@@ -87,7 +115,6 @@
 						xyz:subject ?subject_text ]
 						bind(strdt(?date_string,xsd:dateTime) as ?date)
 						bind(iri(concat(str(:),\"commit/\",?hash)) as ?commit)
-						bind(iri(concat(str(:),\"commit_content/\",?hash)) as ?content)
 						bind(bnode() as ?author)
 						bind(bnode() as ?subject)
 						}
@@ -110,8 +137,10 @@ prefix gist: <https://ontologies.semanticarts.com/gist/>
 prefix schema: <https://schema.org/>
 PREFIX  xsd:  <http://www.w3.org/2001/XMLSchema#>
 construct {
+?commit :contains ?hunk .
 ?hunk a :Hunk .
 ?hunk :alters ?old_file_plaintext .
+?old_file_plaintext a wd:Q113515824 .
 ?old_file_plaintext :in ?old_file .
 ?old_file :name ?old_filename .
 ?old_file a :textfile .
@@ -144,7 +173,8 @@ WHERE
         bind(bnode() as ?old_file)
         bind(bnode(?new_filename) as ?new_file_plaintext)
         bind(bnode() as ?new_file)
-        bind(iri(concat(str(:),\"commit_content/\",?hash)) as ?hunk)
+        bind(iri(concat(str(:),\"commit_hunk/\",struuid())) as ?hunk)
+        bind(iri(concat(str(:),\"commit/\",?hash)) as ?commit)
       }
   }" inputfile)))
 
@@ -201,10 +231,18 @@ WHERE
   (do-hunks "fred" pair ))
 (spit "junk11" (do-hunks "fred" (second (get-hash-pairs "fred"))))
 
+
+(do-hunks "jj" (first (get-hash-pairs "jj")))
+(get-hash-pairs "jj")
+
 (defn do-hunks [repopath pair]
   "TODO probably doesn't handle space in repopath
   pair -- a commitid pair"
   (do
+    ; (printf "in do-hunks. repopath: %s, pair:%s\n" repopath pair)
+    ; (printf "in do-hunks. first pair:%s, secondpair:%s, lastpair:%s\n" (first pair)
+            (second pair)
+            (last pair))
     (clojure.java.io/delete-file "a.patch" true)
     (clojure.java.shell/sh "bash" "-c" "rm -rf hunks")
     (.mkdir (clojure.java.io/file "hunks"))
@@ -300,34 +338,82 @@ WHERE
 
 ;;;;;;;;;;;;;;;;;;;;;
 (def path "sparql.anything")
-(clojure.java.io/delete-file "finalout.nq")
+; (def path "jj")
+; (clojure.java.io/delete-file "finalout.nq")
 (clojure.java.io/delete-file "finalout_summary.nq")
 (clojure.java.io/delete-file "finalout_hunks.nq")
 
-(time (doseq [pair (get-hash-pairs path)]
-        (let [input (str "/tmp/obj_"
-                         (print-str (apply str (interpose "-" pair)))
-                         ".json")]
-          (do
-            (spit input (j/write-value-as-string
-                         (assoc (let [fullmap (get-diff-content path
-                                                                pair) 
-                                      out (:out fullmap)
-                                      a (clojure.string/split-lines out)
-                                      b (mapv (fn [a b]
-                                                {a b})
-                                              (range (count a))
-                                              a)]
-                                  (assoc (dissoc fullmap
-                                                 :out)
-                                         "out_split" b))
-                                :abbreviated_commit_hash (last pair))))
-            (run-sa-construct (make-query-for-commit-content input)
-                              "/mnt/finalout.nq")
-            (spit input (get-commit-summary path
-                                            (second pair)))
-            (run-sa-construct (make-query-for-commit-summary input)
+(count (get-hash-pairs path))
+(doseq [thing [1 2 3 4]
+        idx (range 4)]
+  (printf "%s - %s\n" thing idx))
+
+(doseq [[pair idx] 
+        (map list ["one" "two" "t" "fo"]
+             (range 1 5))]
+  (printf "%s - %s\n" pair idx))
+
+(* 100 (float (/ 500 1000)))
+(= 0 (mod 40 20))
+
+(def bar (pr/progress-bar 100   ))
+(pr/print (pr/tick bar 8.13))
+(print (pr/render bar))
+
+(doseq [[pair idx] (map list '((a b) (b c) (c d))
+                        (range 3))]
+  (printf "%s-%s\n" pair idx))
+
+; TODO throw error is splitpatch is not installed
+
+(time (let [hash-pairs (get-hash-pairs path)
+            total-hash-pairs (count hash-pairs)
+            bar (pr/progress-bar 100)]
+        (doseq [[pair idx] (map list hash-pairs
+                                (range 1 (+ 1 (count hash-pairs))))]
+          (let [input (str "/tmp/obj_"
+                           (print-str (apply str (interpose "-" pair)))
+                           ".json")]
+            (do
+              (if (= 0 (mod idx 20)); every 20 commits do a tick update
+                (pr/print (pr/tick bar (* 100 (/ idx total-hash-pairs))))
+                ) 
+              (comment (spit input (j/write-value-as-string
+                                    (assoc (let [fullmap (get-diff-content path
+                                                                           pair)
+                                                 out (:out fullmap)
+                                                 a (clojure.string/split-lines out)
+                                                 b (mapv (fn [a b]
+                                                           {a b})
+                                                         (range (count a))
+                                                         a)]
+                                             (assoc (dissoc fullmap
+                                                            :out)
+                                                    "out_split" b))
+                                           :abbreviated_commit_hash (last pair)))))
+              (comment (run-sa-construct (make-query-for-commit-content input)
+                                         "/mnt/finalout.nq"))
+              (spit input (get-commit-summary path
+                                              pair))
+              ; (printf "on idx %s\n" idx)
+              ; (printf "pair is %s\n" pair)
+              ; (printf "%s -- %s\n" "sec pair" (second pair))
+              ; (printf "%s\n" "doing summary on ")
+              ; (printf "%s\n" (slurp input))
+              ; (printf "%s\n" "done")
+              (run-sa-construct (make-query-for-commit-summary input)
+                                "/mnt/finalout_summary.nq")
+              (spit input (do-hunks path pair))
+              ; (printf "%s\n" "doing hunks on ")
+              ; (printf "%s\n" (slurp input))
+              (run-sa-construct (make-query-for-hunk input)
+                                "/mnt/finalout_hunks.nq"))))))
+
+
+; (("6e56d40" "188c627")))
+(clojure.java.io/delete-file "/mnt/junk1.json")
+(spit "/mnt/junk1.json" (get-commit-summary "jj"
+                    "03cd687"))
+
+(run-sa-construct (make-query-for-commit-summary "/mnt/junk1.json")
                               "/mnt/finalout_summary.nq")
-            (spit input (do-hunks path pair))
-            (run-sa-construct (make-query-for-hunk input)
-                              "/mnt/finalout_hunks.nq")))))
