@@ -82,7 +82,6 @@
 						# TODO should be optionals?
 						[ xyz:abbreviated_commit_hash ?hash ;
 						xyz:author_name ?name ;
-						xyz:author_name ?name ;
 						xyz:author_email ?email ;
 						xyz:author_date ?date_string ;
 						xyz:subject ?subject_text ]
@@ -96,6 +95,58 @@
 						"
 						inputfile)))
 
+
+(defn make-query-for-hunk [inputfile]
+  (with-out-str (printf "PREFIX  sd:   <https://w3id.org/okn/o/sd#>
+PREFIX  fx:   <http://sparql.xyz/facade-x/ns/>
+PREFIX  rdf:  <http://www.w3.org/1999/02/22-rdf-syntax-ns#>
+PREFIX  xyz:  <http://sparql.xyz/facade-x/data/>
+PREFIX  i:    <https://www.w3id.org/okn/i/>
+PREFIX  rdfs: <http://www.w3.org/2000/01/rdf-schema#>
+PREFIX  :     <http://example.com/>
+PREFIX wd:       <http://www.wikidata.org/entity/>         # Wikibase entity - item or property. 
+prefix dcterms: <http://purl.org/dc/terms/> 
+prefix gist: <https://ontologies.semanticarts.com/gist/>
+prefix schema: <https://schema.org/>
+PREFIX  xsd:  <http://www.w3.org/2001/XMLSchema#>
+construct {
+?hunk a :Hunk .
+?hunk :alters ?old_file_plaintext .
+?old_file_plaintext :in ?old_file .
+?old_file :name ?old_filename .
+?old_file a :textfile .
+?old_file_plaintext :lineNumber ?old_source_start_line .
+?old_file_plaintext :content ?old_content .
+?old_content ?old_content_p ?old_content_line .
+# TODO old_source_line_count and new
+?old_file_plaintext :replacedBy ?new_file_plaintext .
+?new_file_plaintext :in ?new_file .
+?new_file :name ?new_filename .
+?new_file a :textfile .
+?new_file_plaintext :lineNumber ?new_source_start_line .
+?new_file_plaintext :content ?new_content .
+?new_content ?new_content_p ?new_content_line .
+}
+WHERE
+  { SERVICE <x-sparql-anything:>
+      { fx:properties fx:location  \"%s\" .
+# ?s ?p ?o .
+        ?s xyz:commit-id ?hash .
+        ?s xyz:new_content ?new_content .
+        ?new_content ?new_content_p ?new_content_line .
+        ?s xyz:new_filename ?new_filename .
+        ?s xyz:new_source_start_line ?new_source_start_line .
+        ?s xyz:old_content ?old_content .
+        ?old_content ?old_content_p ?old_content_line .
+        ?s xyz:old_filename ?old_filename .
+        ?s xyz:old_source_start_line ?old_source_start_line .
+        bind(bnode(?old_filename) as ?old_file_plaintext)
+        bind(bnode() as ?old_file)
+        bind(bnode(?new_filename) as ?new_file_plaintext)
+        bind(bnode() as ?new_file)
+        bind(iri(concat(str(:),\"commit_content/\",?hash)) as ?hunk)
+      }
+  }" inputfile)))
 
 (defn make-query-for-commit-content [inputfile]
   (with-out-str (printf "
@@ -248,9 +299,10 @@
 (print (raw-hunk->map "/mnt/la"))
 
 ;;;;;;;;;;;;;;;;;;;;;
-(def path "jj")
+(def path "sparql.anything")
 (clojure.java.io/delete-file "finalout.nq")
 (clojure.java.io/delete-file "finalout_summary.nq")
+(clojure.java.io/delete-file "finalout_hunks.nq")
 
 (time (doseq [pair (get-hash-pairs path)]
         (let [input (str "/tmp/obj_"
@@ -277,4 +329,5 @@
             (run-sa-construct (make-query-for-commit-summary input)
                               "/mnt/finalout_summary.nq")
             (spit input (do-hunks path pair))
-            (run-sa-construct TODO   )))))
+            (run-sa-construct (make-query-for-hunk input)
+                              "/mnt/finalout_hunks.nq")))))
