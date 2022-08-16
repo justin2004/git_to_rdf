@@ -146,6 +146,9 @@ construct {
 ?hunk a wd:Q113509427 .
 ?hunk gist:affects ?old_file_plaintext .
 ?old_file_plaintext a wd:Q113515824 . # contiguous lines
+?old_file_plaintext gist:hasMagnitude ?old_source_line_count_mag .
+?old_source_line_count_mag gist:numericValue ?old_source_line_count .
+?old_source_line_count_mag gist:hasUnitOfMeasure gist:_each .
 ?old_file_plaintext gist:occursIn ?old_file .
 ?old_file gist:name ?old_filename . # TODO name vs path
 ?old_file a wd:Q86920 . # text file
@@ -154,10 +157,12 @@ construct {
 ?old_contiguous_lines_id a wd:Q6553274 . # line number
 ?old_file_plaintext :containedTextContainer ?old_content . # TODO predicate
 ?old_content ?old_content_p ?old_content_line .
-# TODO old_source_line_count and new
 ?hunk gist:produces ?new_file_plaintext .
 ?new_file_plaintext gist:occursIn ?new_file .
 ?new_file_plaintext a wd:Q113515824 . # contiguous lines
+?new_file_plaintext gist:hasMagnitude ?new_source_line_count_mag .
+?new_source_line_count_mag gist:numericValue ?new_source_line_count .
+?new_source_line_count_mag gist:hasUnitOfMeasure gist:_each .
 ?new_file gist:name ?new_filename .
 ?new_file a wd:Q86920 . # text file
 ?new_file_plaintext gist:identifiedBy ?new_contiguous_lines_id .
@@ -176,7 +181,10 @@ WHERE
                   bind(bnode() as ?new_contiguous_lines_id)
                   bind(bnode() as ?new_file_plaintext)
                   bind(bnode() as ?new_file)
-                  bind(iri(concat(str(:),\"commit_hunk/\",struuid())) as ?hunk) # TODO i need this to run only once per hunk not once per hunk line
+                  bind(iri(concat(str(:),\"commit_hunk/\",struuid())) as ?hunk) # only bind per hunk not once per hunk line
+                  ?s xyz:new_source_line_count ?new_source_line_count_string .
+                  bind(strdt(?new_source_line_count_string,xsd:integer) as ?new_source_line_count)
+                  bind(bnode() as ?new_source_line_count_mag)
             {?new_content ?new_content_p ?new_content_line .}
         }
         ?s xyz:new_filename ?new_filename .
@@ -186,6 +194,9 @@ WHERE
                   bind(bnode() as ?old_file)
                   bind(bnode() as ?old_file_plaintext)
                   bind(bnode() as ?old_contiguous_lines_id)
+                  ?s xyz:old_source_line_count ?old_source_line_count_string .
+                  bind(strdt(?old_source_line_count_string,xsd:integer) as ?old_source_line_count)
+                  bind(bnode() as ?old_source_line_count_mag)
               {?old_content ?old_content_p ?old_content_line .}
         }
         ?s xyz:old_filename ?old_filename .
@@ -317,11 +328,11 @@ WHERE
                    :new_filename new-filename
                    :old_source_start_line (first (first deets1))
                    :old_source_line_count (if (nil? (second (first deets1)))
-                                            1
+                                            "1"
                                             (second (first deets1)))
                    :new_source_start_line (first (second deets1))
                    :new_source_line_count (if (nil? (second (second deets1)))
-                                            1
+                                            "1"
                                             (second (second deets1)))
                    :old_content (extract-hunk-part \- content)
                    :new_content (extract-hunk-part \+ content)}]
@@ -381,7 +392,7 @@ WHERE
                         (range 3))]
   (printf "%s-%s\n" pair idx))
 
-; TODO throw error is splitpatch is not installed
+; TODO throw error if splitpatch is not installed
 
 (time (let [hash-pairs (get-hash-pairs path)
             total-hash-pairs (count hash-pairs)
