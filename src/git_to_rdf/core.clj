@@ -51,7 +51,8 @@
      (clojure.java.shell/sh "bash" "-c" (str "echo 'abbreviated_commit_hash,author_name,author_email,author_date,subject,body' ; "
                                              "git -C " 
                                              repo-path
-                                             " --no-pager log --date=local --pretty=%h,%an,%ae,%aI,'%s' "
+                                             ; " --no-pager log --date=local --pretty=%h,%an,%ae,%aI,'%s' "
+                                             " --no-pager log --date=local --pretty=%h,%an,%ae,%aI "
                                              "-1 "
                                              (second pair)))))))
 
@@ -97,10 +98,13 @@
 						?commit a wd:Q20058545 .
 						?commit dcterms:creator ?author .
 						?commit gist:atDateTime ?date .
+                        ?commit gist:isIdentifiedBy ?commit_id .
+                        ?commit_id gist:uniqueText ?hash .
 						?author gist:name ?name .
 						?author schema:email ?email .
 						?commit dcterms:subject ?subject .
-						?subject dcterms:title ?subject_text .
+						# ?subject dcterms:title ?subject_text .
+						?subject dcterms:title \"TODO subject goes here\" .
 						?subject dcterms:description \"TODO body goes here\" .
 						#?commit gist:contains ?content . # TODO gist needs this
 						}
@@ -108,11 +112,12 @@
 						{ SERVICE <x-sparql-anything:>
 						{ fx:properties fx:location  \"%s\" .
 						# TODO should be optionals?
-						[ xyz:abbreviated_commit_hash ?hash ;
-						xyz:author_name ?name ;
-						xyz:author_email ?email ;
-						xyz:author_date ?date_string ;
-						xyz:subject ?subject_text ]
+						?s xyz:abbreviated_commit_hash ?hash .
+						?s xyz:author_name ?name .
+						?s xyz:author_email ?email .
+						?s xyz:author_date ?date_string .
+						optional {?s xyz:subject ?subject_text }
+                        bind(bnode() as ?commit_id)
 						bind(strdt(?date_string,xsd:dateTime) as ?date)
 						bind(iri(concat(str(:),\"commit/\",?hash)) as ?commit)
 						bind(bnode() as ?author)
@@ -138,22 +143,27 @@ prefix schema: <https://schema.org/>
 PREFIX  xsd:  <http://www.w3.org/2001/XMLSchema#>
 construct {
 ?commit :contains ?hunk .
-?hunk a :Hunk .
-?hunk :alters ?old_file_plaintext .
-?old_file_plaintext a wd:Q113515824 .
-?old_file_plaintext :in ?old_file .
-?old_file :name ?old_filename .
-?old_file a :textfile .
-?old_file_plaintext :lineNumber ?old_source_start_line .
-?old_file_plaintext :content ?old_content .
+?hunk a wd:Q113509427 .
+?hunk gist:affects ?old_file_plaintext .
+?old_file_plaintext a wd:Q113515824 . # contiguous lines
+?old_file_plaintext gist:occursIn ?old_file .
+?old_file gist:name ?old_filename . # TODO name vs path
+?old_file a wd:Q86920 . # text file
+?old_file_plaintext gist:identifiedBy ?old_contiguous_lines_id .
+?old_contiguous_lines_id gist:numericValue ?old_source_start_line_no .
+?old_contiguous_lines_id a wd:Q6553274 . # line number
+?old_file_plaintext :containedTextContainer ?old_content . # TODO predicate
 ?old_content ?old_content_p ?old_content_line .
 # TODO old_source_line_count and new
-?old_file_plaintext :replacedBy ?new_file_plaintext .
-?new_file_plaintext :in ?new_file .
-?new_file :name ?new_filename .
-?new_file a :textfile .
-?new_file_plaintext :lineNumber ?new_source_start_line .
-?new_file_plaintext :content ?new_content .
+?hunk gist:produces ?new_file_plaintext .
+?new_file_plaintext gist:occursIn ?new_file .
+?new_file_plaintext a wd:Q113515824 . # contiguous lines
+?new_file gist:name ?new_filename .
+?new_file a wd:Q86920 . # text file
+?new_file_plaintext gist:identifiedBy ?new_contiguous_lines_id .
+?new_contiguous_lines_id gist:numericValue ?new_source_start_line_no .
+?new_contiguous_lines_id a wd:Q6553274 . # line number
+?new_file_plaintext :containedTextContainer ?new_content . # TODO predicate
 ?new_content ?new_content_p ?new_content_line .
 }
 WHERE
@@ -161,20 +171,26 @@ WHERE
       { fx:properties fx:location  \"%s\" .
 # ?s ?p ?o .
         ?s xyz:commit-id ?hash .
-        ?s xyz:new_content ?new_content .
-        ?new_content ?new_content_p ?new_content_line .
+        bind(iri(concat(str(:),\"commit/\",?hash)) as ?commit)
+        optional{ ?s xyz:new_content ?new_content . 
+                  bind(bnode() as ?new_contiguous_lines_id)
+                  bind(bnode() as ?new_file_plaintext)
+                  bind(bnode() as ?new_file)
+                  bind(iri(concat(str(:),\"commit_hunk/\",struuid())) as ?hunk) # TODO i need this to run only once per hunk not once per hunk line
+            {?new_content ?new_content_p ?new_content_line .}
+        }
         ?s xyz:new_filename ?new_filename .
         ?s xyz:new_source_start_line ?new_source_start_line .
-        ?s xyz:old_content ?old_content .
-        ?old_content ?old_content_p ?old_content_line .
+        bind(strdt(?new_source_start_line,xsd:integer) as ?new_source_start_line_no)
+        optional {?s xyz:old_content ?old_content .
+                  bind(bnode() as ?old_file)
+                  bind(bnode() as ?old_file_plaintext)
+                  bind(bnode() as ?old_contiguous_lines_id)
+              {?old_content ?old_content_p ?old_content_line .}
+        }
         ?s xyz:old_filename ?old_filename .
         ?s xyz:old_source_start_line ?old_source_start_line .
-        bind(bnode(?old_filename) as ?old_file_plaintext)
-        bind(bnode() as ?old_file)
-        bind(bnode(?new_filename) as ?new_file_plaintext)
-        bind(bnode() as ?new_file)
-        bind(iri(concat(str(:),\"commit_hunk/\",struuid())) as ?hunk)
-        bind(iri(concat(str(:),\"commit/\",?hash)) as ?commit)
+        bind(strdt(?old_source_start_line,xsd:integer) as ?old_source_start_line_no)
       }
   }" inputfile)))
 
@@ -334,11 +350,12 @@ WHERE
 ; the second number is the number of original source lines in this hunk (this includes lines marked with “-“)
 ; the third number is the starting line for this hunk in newfile
 ; the last number is the number of lines after the hunk has been applied.
-(print (raw-hunk->map "/mnt/la"))
+(clojure.pprint/pprint (raw-hunk->map "/mnt/la"))
 
 ;;;;;;;;;;;;;;;;;;;;;
 (def path "sparql.anything")
-; (def path "jj")
+(def path "curl")
+(def path "jw")
 ; (clojure.java.io/delete-file "finalout.nq")
 (clojure.java.io/delete-file "finalout_summary.nq")
 (clojure.java.io/delete-file "finalout_hunks.nq")
@@ -378,6 +395,7 @@ WHERE
               (if (= 0 (mod idx 20)); every 20 commits do a tick update
                 (pr/print (pr/tick bar (* 100 (/ idx total-hash-pairs))))
                 ) 
+              (printf "working on hash: %s\n" (last pair))
               (comment (spit input (j/write-value-as-string
                                     (assoc (let [fullmap (get-diff-content path
                                                                            pair)
@@ -404,8 +422,8 @@ WHERE
               (run-sa-construct (make-query-for-commit-summary input)
                                 "/mnt/finalout_summary.nq")
               (spit input (do-hunks path pair))
-              ; (printf "%s\n" "doing hunks on ")
-              ; (printf "%s\n" (slurp input))
+              (printf "%s\n" "doing hunks on ")
+              (printf "%s\n" (slurp input))
               (run-sa-construct (make-query-for-hunk input)
                                 "/mnt/finalout_hunks.nq"))))))
 
@@ -417,3 +435,5 @@ WHERE
 
 (run-sa-construct (make-query-for-commit-summary "/mnt/junk1.json")
                               "/mnt/finalout_summary.nq")
+
+(clojure.pprint/pprint *e)
