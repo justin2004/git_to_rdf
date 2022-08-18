@@ -5,6 +5,8 @@
 (require '[jsonista.core :as j])
 (require '[progrock.core :as pr])
 
+; TODO don't have a way to identify the same hunk on different runs of this tool
+
 (def bar (pr/progress-bar 100   ))
 (pr/print (pr/tick bar 8.13))
 (print (pr/render bar))
@@ -106,7 +108,6 @@
 						# ?subject dcterms:title ?subject_text .
 						?subject dcterms:title \"TODO subject goes here\" .
 						?subject dcterms:description \"TODO body goes here\" .
-						#?commit gist:contains ?content . # TODO gist needs this
 						}
 						WHERE
 						{ SERVICE <x-sparql-anything:>
@@ -142,7 +143,10 @@ prefix gist: <https://ontologies.semanticarts.com/gist/>
 prefix schema: <https://schema.org/>
 PREFIX  xsd:  <http://www.w3.org/2001/XMLSchema#>
 construct {
-?commit :contains ?hunk .
+?commit gist:hasPart ?hunk .
+?commit a wd:Q20058545 .
+?commit gist:identifiedBy ?commit_id_node .
+?commit_id_node gist:uniqueText ?hash .
 ?hunk a wd:Q113509427 .
 ?hunk gist:affects ?old_file_plaintext .
 ?old_file_plaintext a wd:Q113515824 . # contiguous lines
@@ -176,18 +180,25 @@ WHERE
       { fx:properties fx:location  \"%s\" .
 # ?s ?p ?o .
         ?s xyz:commit-id ?hash .
-        bind(iri(concat(str(:),\"commit/\",?hash)) as ?commit)
+        ?s xyz:origin ?origin .
+        bind(iri(concat(str(:),\"origin=\",encode_for_uri(?origin),\";commit=\",?hash)) as ?commit)
+        bind(iri(concat(str(:),\"origin=\",encode_for_uri(?origin),\";commit=\",?hash,\";identifier\")) as ?commit_id_node)
+        #bind(iri(concat(str(:),\"commit_identifier/\",?hash)) as ?commit_id_node)
+        ?s xyz:new_filename ?new_filename .
+        #bind(if(?new_filename=\"/dev/null\",1/0,bnode()) as ?new_file_plaintext)  # only make a contig lines node if the new file
+                                                        # isn't /dev/null
+        bind(bnode() as ?new_file_plaintext)
         optional{ ?s xyz:new_content ?new_content . 
                   bind(bnode() as ?new_contiguous_lines_id)
-                  bind(bnode() as ?new_file_plaintext)
                   bind(bnode() as ?new_file)
-                  bind(iri(concat(str(:),\"commit_hunk/\",struuid())) as ?hunk) # only bind per hunk not once per hunk line
+                  ?s xyz:commit-id ?hash .
+                  ?s xyz:origin ?origin .
+                  bind(iri(concat(str(:),\"origin=\",encode_for_uri(?origin),\";commit=\",?hash,\";hunk=\",struuid())) as ?hunk) # only bind per hunk not once per hunk line
                   ?s xyz:new_source_line_count ?new_source_line_count_string .
                   bind(strdt(?new_source_line_count_string,xsd:integer) as ?new_source_line_count)
                   bind(bnode() as ?new_source_line_count_mag)
-            {?new_content ?new_content_p ?new_content_line .}
+            optional {?new_content ?new_content_p ?new_content_line .}
         }
-        ?s xyz:new_filename ?new_filename .
         ?s xyz:new_source_start_line ?new_source_start_line .
         bind(strdt(?new_source_start_line,xsd:integer) as ?new_source_start_line_no)
         optional {?s xyz:old_content ?old_content .
@@ -262,12 +273,14 @@ WHERE
 (do-hunks "jj" (first (get-hash-pairs "jj")))
 (get-hash-pairs "jj")
 
-(defn do-hunks [repopath pair]
+(defn do-hunks [repopath pair origin]
   "TODO probably doesn't handle space in repopath
-  pair -- a commitid pair"
+  pair -- a commitid pair
+  origin -- the url of the remote origin (for minting URIs)
+  "
   (do
-    ; (printf "in do-hunks. repopath: %s, pair:%s\n" repopath pair)
-    ; (printf "in do-hunks. first pair:%s, secondpair:%s, lastpair:%s\n" (first pair)
+    (printf "in do-hunks. repopath: %s, pair:%s\n" repopath pair)
+    (printf "in do-hunks. first pair:%s, secondpair:%s, lastpair:%s\n" (first pair)
             (second pair)
             (last pair))
     (clojure.java.io/delete-file "a.patch" true)
@@ -280,12 +293,14 @@ WHERE
                                             " "
                                             (second pair)
                                             " > a.patch"))
+    ; TODO splitpatch ignores chmods
     (clojure.java.shell/sh "bash" "-c" "cd /mnt/hunks ; splitpatch -H ../a.patch")
     ; (doseq [hunk (filter #(.isFile %) (file-seq (clojure.java.io/file "hunks")))]
     ;       (clojure.pprint/pprint (assoc (raw-hunk->map (.getPath hunk))
     ;                                     :commit-id (last pair))))
     (let  [result (mapv #(assoc (raw-hunk->map (.getPath %))
-                                :commit-id (last pair))
+                                :commit-id (last pair)
+                                :origin origin)
                         (filter #(.isFile %)
                                 (file-seq (clojure.java.io/file "hunks"))))]
       (clojure.java.shell/sh "bash" "-c" "rm -rf hunks/*")
@@ -366,10 +381,9 @@ WHERE
 ;;;;;;;;;;;;;;;;;;;;;
 (def path "sparql.anything")
 (def path "curl")
+(def path "one_ea")
 (def path "jw")
 ; (clojure.java.io/delete-file "finalout.nq")
-(clojure.java.io/delete-file "finalout_summary.nq")
-(clojure.java.io/delete-file "finalout_hunks.nq")
 
 (count (get-hash-pairs path))
 (doseq [thing [1 2 3 4]
@@ -393,10 +407,20 @@ WHERE
   (printf "%s-%s\n" pair idx))
 
 ; TODO throw error if splitpatch is not installed
+(get-repo-origin "one_ea")
 
 (time (let [hash-pairs (get-hash-pairs path)
             total-hash-pairs (count hash-pairs)
-            bar (pr/progress-bar 100)]
+            origin-raw (get-repo-origin path)
+            origin (if (empty? origin-raw)
+                     (.toString (java.util.UUID/randomUUID))
+                     origin-raw)
+            bar (pr/progress-bar 100)
+            _ (try (clojure.java.io/delete-file "finalout_summary.nq")
+                   (catch Exception e))
+            _ (try (clojure.java.io/delete-file "finalout_hunks.nq")
+                   (catch Exception e))
+            ]
         (doseq [[pair idx] (map list hash-pairs
                                 (range 1 (+ 1 (count hash-pairs))))]
           (let [input (str "/tmp/obj_"
@@ -406,7 +430,7 @@ WHERE
               (if (= 0 (mod idx 20)); every 20 commits do a tick update
                 (pr/print (pr/tick bar (* 100 (/ idx total-hash-pairs))))
                 ) 
-              (printf "working on hash: %s\n" (last pair))
+              ; (printf "working on hash: %s\n" (last pair))
               (comment (spit input (j/write-value-as-string
                                     (assoc (let [fullmap (get-diff-content path
                                                                            pair)
@@ -432,11 +456,24 @@ WHERE
               ; (printf "%s\n" "done")
               (run-sa-construct (make-query-for-commit-summary input)
                                 "/mnt/finalout_summary.nq")
-              (spit input (do-hunks path pair))
+              (spit input (do-hunks path pair origin))
               (printf "%s\n" "doing hunks on ")
               (printf "%s\n" (slurp input))
               (run-sa-construct (make-query-for-hunk input)
                                 "/mnt/finalout_hunks.nq"))))))
+
+
+(get-repo-origin "one_ea")
+(defn get-repo-origin [repopath]
+  (let [origin-string (clojure.string/trim (:out
+                        (clojure.java.shell/sh
+                         "bash" "-c"
+                         (str "git -C "
+                              repopath
+                              " remote get-url origin"))))]
+    (if (clojure.string/blank? origin-string)
+      nil
+      origin-string)))
 
 
 ; (("6e56d40" "188c627")))
