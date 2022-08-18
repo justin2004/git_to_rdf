@@ -7,6 +7,8 @@
 
 ; TODO don't have a way to identify the same hunk on different runs of this tool
 
+; TODO need to escape header and body and then get them
+
 (def bar (pr/progress-bar 100   ))
 (pr/print (pr/tick bar 8.13))
 (print (pr/render bar))
@@ -45,18 +47,26 @@
 
 ; TODO use hash/commitid consistently
 
+(clojure.pprint/pprint (get-commit-summary-maps "jw"
+                         (first (get-hash-pairs "jw"))  
+                         "ORI"))
+(get-hash-pairs "jw")
+
 ; get-commit-summary-map  repo hash
-(defn get-commit-summary-maps [repo-path pair]
-  (csv-data->maps
-   (csv/read-csv
-    (:out
-     (clojure.java.shell/sh "bash" "-c" (str "echo 'abbreviated_commit_hash,author_name,author_email,author_date,subject,body' ; "
-                                             "git -C " 
-                                             repo-path
-                                             ; " --no-pager log --date=local --pretty=%h,%an,%ae,%aI,'%s' "
-                                             " --no-pager log --date=local --pretty=%h,%an,%ae,%aI "
-                                             "-1 "
-                                             (second pair)))))))
+(defn get-commit-summary-maps [repo-path pair origin]
+  (let [bigmap (first ; first because there is only 1 csv row per commit summary
+                 (csv-data->maps
+                (csv/read-csv
+                 (:out
+                  (clojure.java.shell/sh "bash" "-c" (str "echo 'abbreviated_commit_hash,author_name,author_email,author_date,subject,body' ; "
+                                                          "git -C " 
+                                                          repo-path
+                                                          ; " --no-pager log --date=local --pretty=%h,%an,%ae,%aI,'%s' "
+                                                          " --no-pager log --date=local --pretty=%h,%an,%ae,%aI "
+                                                          "-1 "
+                                                          (second pair)))))))]
+     (assoc bigmap
+           :origin origin)))
 
 
 (defn get-diff-content [repo-path pair]
@@ -74,10 +84,9 @@
 ; (("6e56d40" "188c627")))
 
 
-(defn get-commit-summary [repo-path pair]
+(defn get-commit-summary [repo-path pair origin]
   (json/write-str
-   (get-commit-summary-maps repo-path
-                             pair)))
+   (get-commit-summary-maps repo-path pair origin)))
 
 
 
@@ -114,13 +123,15 @@
 						{ fx:properties fx:location  \"%s\" .
 						# TODO should be optionals?
 						?s xyz:abbreviated_commit_hash ?hash .
+						?s xyz:origin ?origin .
+                        bind(iri(concat(str(:),\"origin=\",encode_for_uri(?origin),\";commit=\",?hash)) as ?commit)
 						?s xyz:author_name ?name .
 						?s xyz:author_email ?email .
 						?s xyz:author_date ?date_string .
 						optional {?s xyz:subject ?subject_text }
                         bind(bnode() as ?commit_id)
 						bind(strdt(?date_string,xsd:dateTime) as ?date)
-						bind(iri(concat(str(:),\"commit/\",?hash)) as ?commit)
+						#bind(iri(concat(str(:),\"commit/\",?hash)) as ?commit)
 						bind(bnode() as ?author)
 						bind(bnode() as ?subject)
 						}
@@ -144,9 +155,8 @@ prefix schema: <https://schema.org/>
 PREFIX  xsd:  <http://www.w3.org/2001/XMLSchema#>
 construct {
 ?commit gist:hasPart ?hunk .
-?commit a wd:Q20058545 .
-?commit gist:identifiedBy ?commit_id_node .
-?commit_id_node gist:uniqueText ?hash .
+#?commit gist:identifiedBy ?commit_id_node .
+#?commit_id_node gist:uniqueText ?hash .
 ?hunk a wd:Q113509427 .
 ?hunk gist:affects ?old_file_plaintext .
 ?old_file_plaintext a wd:Q113515824 . # contiguous lines
@@ -182,7 +192,7 @@ WHERE
         ?s xyz:commit-id ?hash .
         ?s xyz:origin ?origin .
         bind(iri(concat(str(:),\"origin=\",encode_for_uri(?origin),\";commit=\",?hash)) as ?commit)
-        bind(iri(concat(str(:),\"origin=\",encode_for_uri(?origin),\";commit=\",?hash,\";identifier\")) as ?commit_id_node)
+        #bind(iri(concat(str(:),\"origin=\",encode_for_uri(?origin),\";commit=\",?hash,\";identifier\")) as ?commit_id_node)
         #bind(iri(concat(str(:),\"commit_identifier/\",?hash)) as ?commit_id_node)
         ?s xyz:new_filename ?new_filename .
         #bind(if(?new_filename=\"/dev/null\",1/0,bnode()) as ?new_file_plaintext)  # only make a contig lines node if the new file
@@ -447,7 +457,8 @@ WHERE
               (comment (run-sa-construct (make-query-for-commit-content input)
                                          "/mnt/finalout.nq"))
               (spit input (get-commit-summary path
-                                              pair))
+                                              pair
+                                              origin))
               ; (printf "on idx %s\n" idx)
               ; (printf "pair is %s\n" pair)
               ; (printf "%s -- %s\n" "sec pair" (second pair))
