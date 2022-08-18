@@ -1,17 +1,21 @@
-(ns git-to-rdf.core)
-(require '[clojure.data.json :as json])
-(require '[clojure.data.csv :as csv])
-(require '[jsonista.core :as j])
-(require '[jsonista.core :as j])
-(require '[progrock.core :as pr])
+(ns git-to-rdf.core
+  (:require [clojure.data.json :as json])
+  (:require [clojure.data.csv :as csv])
+  (:require [jsonista.core :as j])
+  (:require [jsonista.core :as j])
+  (:require [progrock.core :as pr]))
 
 ; TODO don't have a way to identify the same hunk on different runs of this tool
 
 ; TODO need to escape header and body and then get them
 
-(def bar (pr/progress-bar 100   ))
-(pr/print (pr/tick bar 8.13))
-(print (pr/render bar))
+; TODO use more URIs to reduce quad count (e.g. for IDs)
+
+(defn installed? [cmd]
+  (= 0 (:exit (clojure.java.shell/sh "bash" "-c" (str "command -V " cmd)))))
+
+(if (not (installed? "splitpatch"))
+  (throw (Exception. "ERROR: splitpatch is not installed")))
 
 (defmacro with-txn [dataset & body] 
   `(try
@@ -43,14 +47,9 @@
           "4b825dc642cb6eb9a060e54bf8d69288fbee4904"))))
 
 
-(get-hash-pairs "jj")
 
 ; TODO use hash/commitid consistently
 
-(clojure.pprint/pprint (get-commit-summary-maps "jw"
-                         (first (get-hash-pairs "jw"))  
-                         "ORI"))
-(get-hash-pairs "jw")
 
 ; get-commit-summary-map  repo hash
 (defn get-commit-summary-maps [repo-path pair origin]
@@ -79,7 +78,7 @@
                                           (second pair))))
 
 
-(filter #(= "188c627" (second %))  (get-hash-pairs "sparql.anything"))
+; (filter #(= "188c627" (second %))  (get-hash-pairs "sparql.anything"))
 ; 188c627
 ; (("6e56d40" "188c627")))
 
@@ -276,12 +275,48 @@ WHERE
 ;        make clj map and convert to json obj
 
 (doseq [pair (get-hash-pairs "fred")] 
-  (do-hunks "fred" pair ))
-(spit "junk11" (do-hunks "fred" (second (get-hash-pairs "fred"))))
+  (do-hunks "fred" (first (get-hash-pairs "fred")) "OORI" ))
+; (spit "junk11" (do-hunks "fred" (second (get-hash-pairs "fred"))))
+
+(defn handle-filename [s]
+  (clojure.string/replace (subs s
+                                4)
+                          #"^[ab]/" ""))
 
 
-(do-hunks "jj" (first (get-hash-pairs "jj")))
-(get-hash-pairs "jj")
+(defn extract-hunk-part [leading-char content-seq]
+  (mapv #(subs % 1)
+        (filter #(= leading-char
+                    (first (subs % 0 1)))
+                content-seq)))
+
+(defn raw-hunk->map [path]
+  "convert a raw-hunk (unified diff) file into a map"
+  (let [lines (clojure.string/split-lines (slurp path))
+        old-filename (handle-filename (nth lines 0))
+        new-filename (handle-filename (nth lines 1))
+        deets-raw (nth lines 2)
+        deets-clean (clojure.string/replace deets-raw #".*@@ (.*) @@.*" "$1")
+        deets-clean-no-signs (clojure.string/replace deets-clean
+                                                     #"[+-]"
+                                                     "")
+        deets (clojure.string/split deets-clean-no-signs #" ")
+        deets1 (mapv #(clojure.string/split % #",") deets)
+        ; content (drop-last 2 (drop 3 lines))
+        content (drop 3 lines)
+        deets-map {:old_filename old-filename
+                   :new_filename new-filename
+                   :old_source_start_line (first (first deets1))
+                   :old_source_line_count (if (nil? (second (first deets1)))
+                                            "1"
+                                            (second (first deets1)))
+                   :new_source_start_line (first (second deets1))
+                   :new_source_line_count (if (nil? (second (second deets1)))
+                                            "1"
+                                            (second (second deets1)))
+                   :old_content (extract-hunk-part \- content)
+                   :new_content (extract-hunk-part \+ content)}]
+    deets-map))
 
 (defn do-hunks [repopath pair origin]
   "TODO probably doesn't handle space in repopath
@@ -289,10 +324,10 @@ WHERE
   origin -- the url of the remote origin (for minting URIs)
   "
   (do
-    (printf "in do-hunks. repopath: %s, pair:%s\n" repopath pair)
-    (printf "in do-hunks. first pair:%s, secondpair:%s, lastpair:%s\n" (first pair)
-            (second pair)
-            (last pair))
+    ; (printf "in do-hunks. repopath: %s, pair:%s\n" repopath pair)
+    ; (printf "in do-hunks. first pair:%s, secondpair:%s, lastpair:%s\n" (first pair)
+    ;         (second pair)
+    ;         (last pair))
     (clojure.java.io/delete-file "a.patch" true)
     (clojure.java.shell/sh "bash" "-c" "rm -rf hunks")
     (.mkdir (clojure.java.io/file "hunks"))
@@ -325,50 +360,14 @@ WHERE
 ; (clojure.java.shell/sh "bash" "-c" "cd /mnt/jj ; pwd")
 ; (file-seq (clojure.java.io/file "/mnt"))
 
-(defn handle-filename [s]
-  (clojure.string/replace (subs s
-                                4)
-                          #"^[ab]/" ""))
 
 ; TODO test
 ; (handle-filename  "--- a/sparql.anything.xml/pom.xml")
 ; (handle-filename  "--- /dev/null")
 
 
-(defn raw-hunk->map [path]
-  "convert a raw-hunk (unified diff) file into a map"
-  (let [lines (clojure.string/split-lines (slurp path))
-        old-filename (handle-filename (nth lines 0))
-        new-filename (handle-filename (nth lines 1))
-        deets-raw (nth lines 2)
-        deets-clean (clojure.string/replace deets-raw #".*@@ (.*) @@.*" "$1")
-        deets-clean-no-signs (clojure.string/replace deets-clean
-                                                     #"[+-]"
-                                                     "")
-        deets (clojure.string/split deets-clean-no-signs #" ")
-        deets1 (mapv #(clojure.string/split % #",") deets)
-        ; content (drop-last 2 (drop 3 lines))
-        content (drop 3 lines)
-        deets-map {:old_filename old-filename
-                   :new_filename new-filename
-                   :old_source_start_line (first (first deets1))
-                   :old_source_line_count (if (nil? (second (first deets1)))
-                                            "1"
-                                            (second (first deets1)))
-                   :new_source_start_line (first (second deets1))
-                   :new_source_line_count (if (nil? (second (second deets1)))
-                                            "1"
-                                            (second (second deets1)))
-                   :old_content (extract-hunk-part \- content)
-                   :new_content (extract-hunk-part \+ content)}]
-    deets-map))
 
 
-(defn extract-hunk-part [leading-char content-seq]
-  (mapv #(subs % 1)
-        (filter #(= leading-char
-                    (first (subs % 0 1)))
-                content-seq)))
 
 
 ; (print (slurp (nth (file-seq (clojure.java.io/file ".")) 
@@ -386,49 +385,45 @@ WHERE
 ; the second number is the number of original source lines in this hunk (this includes lines marked with “-“)
 ; the third number is the starting line for this hunk in newfile
 ; the last number is the number of lines after the hunk has been applied.
-(clojure.pprint/pprint (raw-hunk->map "/mnt/la"))
+; (clojure.pprint/pprint (raw-hunk->map "/mnt/la"))
 
-;;;;;;;;;;;;;;;;;;;;;
-(def path "sparql.anything")
-(def path "curl")
-(def path "one_ea")
-(def path "jw")
-; (clojure.java.io/delete-file "finalout.nq")
 
-(count (get-hash-pairs path))
-(doseq [thing [1 2 3 4]
-        idx (range 4)]
-  (printf "%s - %s\n" thing idx))
 
-(doseq [[pair idx] 
-        (map list ["one" "two" "t" "fo"]
-             (range 1 5))]
-  (printf "%s - %s\n" pair idx))
 
-(* 100 (float (/ 500 1000)))
-(= 0 (mod 40 20))
+(defn get-repo-origin [repopath]
+  (let [origin-string (clojure.string/trim (:out
+                        (clojure.java.shell/sh
+                         "bash" "-c"
+                         (str "git -C "
+                              repopath
+                              " remote get-url origin"))))]
+    (if (clojure.string/blank? origin-string)
+      nil
+      origin-string)))
 
-(def bar (pr/progress-bar 100   ))
-(pr/print (pr/tick bar 8.13))
-(print (pr/render bar))
-
-(doseq [[pair idx] (map list '((a b) (b c) (c d))
-                        (range 3))]
-  (printf "%s-%s\n" pair idx))
 
 ; TODO throw error if splitpatch is not installed
-(get-repo-origin "one_ea")
 
-(time (let [hash-pairs (get-hash-pairs path)
+
+;;;;;;;;;;;;;;;;;;;;;
+; (def path "sparql.anything")
+; (def path "curl")
+; (def path "one_ea")
+(def path  "/mnta/rdf_stuff/curl")
+(clojure.pprint/pprint (file-seq (clojure.java.io/file "/mnta/rdf_stuff/curl")))
+; (def path "jw")
+; (clojure.java.io/delete-file "finalout.nq")
+(time (let [output-dir "/mnta/rdf_stuff/curl_rdf/"
+            hash-pairs (get-hash-pairs path)
             total-hash-pairs (count hash-pairs)
             origin-raw (get-repo-origin path)
             origin (if (empty? origin-raw)
                      (.toString (java.util.UUID/randomUUID))
                      origin-raw)
             bar (pr/progress-bar 100)
-            _ (try (clojure.java.io/delete-file "finalout_summary.nq")
+            _ (try (clojure.java.io/delete-file (str output-dir "finalout_summary.nq")) ; TODO put in 1 place
                    (catch Exception e))
-            _ (try (clojure.java.io/delete-file "finalout_hunks.nq")
+            _ (try (clojure.java.io/delete-file (str output-dir "finalout_hunks.nq"))
                    (catch Exception e))
             ]
         (doseq [[pair idx] (map list hash-pairs
@@ -466,33 +461,14 @@ WHERE
               ; (printf "%s\n" (slurp input))
               ; (printf "%s\n" "done")
               (run-sa-construct (make-query-for-commit-summary input)
-                                "/mnt/finalout_summary.nq")
+                                (str output-dir "finalout_summary.nq"))
               (spit input (do-hunks path pair origin))
-              (printf "%s\n" "doing hunks on ")
-              (printf "%s\n" (slurp input))
+              ; (printf "path:%s\n" path)
+              ; (printf "%s\n" "doing hunks on ")
+              ; (printf "%s\n" (slurp input))
               (run-sa-construct (make-query-for-hunk input)
-                                "/mnt/finalout_hunks.nq"))))))
+                                (str output-dir "finalout_hunks.nq")))))))
 
 
-(get-repo-origin "one_ea")
-(defn get-repo-origin [repopath]
-  (let [origin-string (clojure.string/trim (:out
-                        (clojure.java.shell/sh
-                         "bash" "-c"
-                         (str "git -C "
-                              repopath
-                              " remote get-url origin"))))]
-    (if (clojure.string/blank? origin-string)
-      nil
-      origin-string)))
 
 
-; (("6e56d40" "188c627")))
-(clojure.java.io/delete-file "/mnt/junk1.json")
-(spit "/mnt/junk1.json" (get-commit-summary "jj"
-                    "03cd687"))
-
-(run-sa-construct (make-query-for-commit-summary "/mnt/junk1.json")
-                              "/mnt/finalout_summary.nq")
-
-(clojure.pprint/pprint *e)
