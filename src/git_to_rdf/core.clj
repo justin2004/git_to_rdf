@@ -8,6 +8,7 @@
 ; TODO don't have a way to identify the same hunk on different runs of this tool
 
 ; TODO need to escape header and body and then get them
+;     also author can have comma in it
 
 ; TODO use more URIs to reduce quad count (e.g. for IDs)
 
@@ -31,8 +32,20 @@
        (rest csv-data)))
 
 
+; (identifier \|)
+; (first "|")
+
+; (junk 4 :separator 1 :quote \")
+; (defn junk [input & options]
+;   (let [{:keys [separator quote] :or {separator \, quote \"}} options]
+;   options))
+
+
+; (csv-data->maps (csv/read-csv (with-out-str (printf "one|two|three\n1|2|3"))
+;               :separator \| :quote \"))
 
 ; get-commit-hash-pairs  repo
+; TODO where is this used?
 (defn get-commit-hash-pairs [repo-path]
   (csv-data->maps (csv/read-csv (:out (clojure.java.shell/sh "bash" "-c" (str "echo 'abbreviated_commit_hash' ; "
                                         "git -C "
@@ -45,27 +58,49 @@
     (partition 2 1
                (conj (reverse (map :abbreviated_commit_hash m))
           "4b825dc642cb6eb9a060e54bf8d69288fbee4904"))))
+;          ^ that commit id is the empty tree object
 
+; (clojure.string/trim "one\ntwo\n")
+; (if (= "" (clojure.string/trim (get-commit-body "one_ea"
+;                  (last (get-hash-pairs "one_ea")))))
+;   88)
 
+; need this because body can contain newlines
+(defn get-commit-body [repo-path pair]
+  (let [result (clojure.string/trim
+                (:out
+                 (clojure.java.shell/sh 
+                  "bash" "-c" (str "git -C " 
+                                   repo-path
+                                   " --no-pager log --date=local --pretty=%b "
+                                   "-1 "
+                                   (second pair)))))]
+    (if (= result "")
+      nil
+      result)))
 
 ; TODO use hash/commitid consistently
 
 
-; get-commit-summary-map  repo hash
+; TODO if any of the summary fields contain ⍎ then this will break
 (defn get-commit-summary-maps [repo-path pair origin]
   (let [bigmap (first ; first because there is only 1 csv row per commit summary
                  (csv-data->maps
                 (csv/read-csv
                  (:out
-                  (clojure.java.shell/sh "bash" "-c" (str "echo 'abbreviated_commit_hash,author_name,author_email,author_date,subject,body' ; "
+                  (clojure.java.shell/sh "bash" "-c" (str "echo 'abbreviated_commit_hash⍎author_name⍎author_email⍎author_date⍎subject' ; "
                                                           "git -C " 
                                                           repo-path
                                                           ; " --no-pager log --date=local --pretty=%h,%an,%ae,%aI,'%s' "
-                                                          " --no-pager log --date=local --pretty=%h,%an,%ae,%aI "
-                                                          "-1 "
-                                                          (second pair)))))))]
-     (assoc bigmap
-           :origin origin)))
+                                                          " --no-pager log --date=local --pretty='%h⍎%an⍎%ae⍎%aI⍎%s'"
+                                                          " -1 "
+                                                          (second pair))))
+                  :separator \⍎)))]
+    (assoc bigmap
+           :origin origin
+           :body (get-commit-body repo-path pair))))
+
+
 
 
 (defn get-diff-content [repo-path pair]
@@ -113,9 +148,8 @@
 						?author gist:name ?name .
 						?author schema:email ?email .
 						?commit dcterms:subject ?subject .
-						# ?subject dcterms:title ?subject_text .
-						?subject dcterms:title \"TODO subject goes here\" .
-						?subject dcterms:description \"TODO body goes here\" .
+						?subject dcterms:title ?subject_text .
+						?subject dcterms:description ?body_text .
 						}
 						WHERE
 						{ SERVICE <x-sparql-anything:>
@@ -128,6 +162,7 @@
 						?s xyz:author_email ?email .
 						?s xyz:author_date ?date_string .
 						optional {?s xyz:subject ?subject_text }
+						optional {?s xyz:body ?body_text }
                         bind(bnode() as ?commit_id)
 						bind(strdt(?date_string,xsd:dateTime) as ?date)
 						#bind(iri(concat(str(:),\"commit/\",?hash)) as ?commit)
@@ -274,8 +309,8 @@ WHERE
 ;    for each file in hunks... 
 ;        make clj map and convert to json obj
 
-(doseq [pair (get-hash-pairs "fred")] 
-  (do-hunks "fred" (first (get-hash-pairs "fred")) "OORI" ))
+; (doseq [pair (get-hash-pairs "fred")] 
+;   (do-hunks "fred" (first (get-hash-pairs "fred")) "OORI" ))
 ; (spit "junk11" (do-hunks "fred" (second (get-hash-pairs "fred"))))
 
 (defn handle-filename [s]
@@ -408,12 +443,12 @@ WHERE
 ;;;;;;;;;;;;;;;;;;;;;
 ; (def path "sparql.anything")
 ; (def path "curl")
-; (def path "one_ea")
-(def path  "/mnta/rdf_stuff/curl")
+(def path "one_ea")
+; (def path  "/mnta/rdf_stuff/curl")
 (clojure.pprint/pprint (file-seq (clojure.java.io/file "/mnta/rdf_stuff/curl")))
 ; (def path "jw")
 ; (clojure.java.io/delete-file "finalout.nq")
-(time (let [output-dir "/mnta/rdf_stuff/curl_rdf/"
+(time (let [output-dir "/mnt/" ; "/mnta/rdf_stuff/curl_rdf/"
             hash-pairs (get-hash-pairs path)
             total-hash-pairs (count hash-pairs)
             origin-raw (get-repo-origin path)
