@@ -5,7 +5,7 @@
   (:require [jsonista.core :as j])
   (:require [progrock.core :as pr]))
 
-; TODO .rq in files, use SA stdout, add cli options
+; TODO  add cli options
 ;       put hunk stuff in a dir, put summary stuff in a dir
 
 ; TODO connecting vulnerabilies (CVEs) to file names / commits / tags / releases
@@ -151,13 +151,23 @@
   (with-out-str (printf (slurp "queries/hunk.rq") inputfile)))
 
 
+(defn change-system-out []
+  (let [so (java.lang.System/out) ; TODO restore it?
+        out-buffer (new java.io.ByteArrayOutputStream)])
+  (java.lang.System/setOut (new java.io.PrintStream 
+                                out-buffer
+                                true
+                                "UTF-8"))
+  out-buffer) 
 
-(defn run-sa-construct [query outputfile]
-  (com.github.sparqlanything.cli.SPARQLAnything/main 
-   (into-array ["-q" query 
-				"-o" outputfile
-				"--append"
-				"-f" "NQ"])))
+(defn run-sa-construct [query outputfile buffer]
+  (do
+    (.reset buffer)
+    (com.github.sparqlanything.cli.SPARQLAnything/main 
+     (into-array ["-q" query 
+                  "-f" "NQ"]))
+    (spit outputfile
+          buffer :append true)))
 
 
 ;;;;;
@@ -309,59 +319,66 @@
 ; (clojure.pprint/pprint (file-seq (clojure.java.io/file "/mnta/rdf_stuff/curl")))
 ; (def path "jw")
 ; (clojure.java.io/delete-file "finalout.nq")
-(comment (def f0 (future (time (let [output-dir "/mnt/" ; "/mnta/rdf_stuff/curl_rdf/"
-            hash-pairs (get-hash-pairs path)
-            total-hash-pairs (count hash-pairs)
-            origin-raw (get-repo-origin path)
-            origin (if (empty? origin-raw)
-                     (.toString (java.util.UUID/randomUUID))
-                     origin-raw)
-            bar (pr/progress-bar 100)
-            _ (try (clojure.java.io/delete-file (str output-dir "finalout_summary.nq")) ; TODO put in 1 place
-                   (catch Exception e))
-            _ (try (clojure.java.io/delete-file (str output-dir "finalout_hunks.nq"))
-                   (catch Exception e))
-            ]
-        (doseq [[pair idx] (map list hash-pairs
-                                (range 1 (+ 1 (count hash-pairs))))]
-          (let [input (str "/tmp/obj_"
-                           (print-str (apply str (interpose "-" pair)))
-                           ".json")]
-            (do
-              (if (= 0 (mod idx 20)); every 20 commits do a tick update
-                (pr/print (pr/tick bar (* 100 (/ idx total-hash-pairs))))
-                ) 
-              (printf "working on hash: %s\n" (last pair))
-              (comment (spit input (j/write-value-as-string
-                                    (assoc (let [fullmap (get-diff-content path
-                                                                           pair)
-                                                 out (:out fullmap)
-                                                 a (clojure.string/split-lines out)
-                                                 b (mapv (fn [a b]
-                                                           {a b})
-                                                         (range (count a))
-                                                         a)]
-                                             (assoc (dissoc fullmap
-                                                            :out)
-                                                    "out_split" b))
-                                           :abbreviated_commit_hash (last pair)))))
-              (spit input (get-commit-summary path
-                                              pair
-                                              origin))
-              ; (printf "on idx %s\n" idx)
-              ; (printf "pair is %s\n" pair)
-              ; (printf "%s -- %s\n" "sec pair" (second pair))
-              ; (printf "%s\n" "doing summary on ")
-              ; (printf "%s\n" (slurp input))
-              ; (printf "%s\n" "done")
-              (run-sa-construct (make-query-for-commit-summary input)
-                                (str output-dir "finalout_summary.nq"))
-              (spit input (do-hunks path pair origin))
-              ; (printf "path:%s\n" path)
-              ; (printf "%s\n" "doing hunks on ")
-              ; (printf "%s\n" (slurp input))
-              (run-sa-construct (make-query-for-hunk input)
-                                (str output-dir "finalout_hunks.nq"))))))))))
+(comment
+  (def f0
+    (future
+      (time
+       (let [buffer (change-system-out)
+             output-dir "/mnt/" ; "/mnta/rdf_stuff/curl_rdf/"
+             hash-pairs (get-hash-pairs path)
+             total-hash-pairs (count hash-pairs)
+             origin-raw (get-repo-origin path)
+             origin (if (empty? origin-raw)
+                      (.toString (java.util.UUID/randomUUID))
+                      origin-raw)
+             bar (pr/progress-bar 100)
+             _ (try (clojure.java.io/delete-file (str output-dir "finalout_summary.nq")) ; TODO put in 1 place
+                    (catch Exception e))
+             _ (try (clojure.java.io/delete-file (str output-dir "finalout_hunks.nq"))
+                    (catch Exception e))
+             ]
+         (doseq [[pair idx] (map list hash-pairs
+                                 (range 1 (+ 1 (count hash-pairs))))]
+           (let [input (str "/tmp/obj_"
+                            (print-str (apply str (interpose "-" pair)))
+                            ".json")]
+             (do
+               (if (= 0 (mod idx 20)); every 20 commits do a tick update
+                 (pr/print (pr/tick bar (* 100 (/ idx total-hash-pairs))))
+                 ) 
+               (printf "working on hash: %s\n" (last pair))
+               (comment (spit input (j/write-value-as-string
+                                     (assoc (let [fullmap (get-diff-content path
+                                                                            pair)
+                                                  out (:out fullmap)
+                                                  a (clojure.string/split-lines out)
+                                                  b (mapv (fn [a b]
+                                                            {a b})
+                                                          (range (count a))
+                                                          a)]
+                                              (assoc (dissoc fullmap
+                                                             :out)
+                                                     "out_split" b))
+                                            :abbreviated_commit_hash (last pair)))))
+               (spit input (get-commit-summary path
+                                               pair
+                                               origin))
+               ; (printf "on idx %s\n" idx)
+               ; (printf "pair is %s\n" pair)
+               ; (printf "%s -- %s\n" "sec pair" (second pair))
+               ; (printf "%s\n" "doing summary on ")
+               ; (printf "%s\n" (slurp input))
+               ; (printf "%s\n" "done")
+               (run-sa-construct (make-query-for-commit-summary input)
+                                 (str output-dir "finalout_summary.nq")
+                                 buffer)
+               (spit input (do-hunks path pair origin))
+               ; (printf "path:%s\n" path)
+               ; (printf "%s\n" "doing hunks on ")
+               ; (printf "%s\n" (slurp input))
+               (run-sa-construct (make-query-for-hunk input)
+                                 (str output-dir "finalout_hunks.nq")
+                                 buffer)))))))))
 
 
 
