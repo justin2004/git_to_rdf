@@ -1,0 +1,44 @@
+PREFIX  sd:   <https://w3id.org/okn/o/sd#>
+PREFIX  fx:   <http://sparql.xyz/facade-x/ns/>
+PREFIX  rdf:  <http://www.w3.org/1999/02/22-rdf-syntax-ns#>
+PREFIX  xyz:  <http://sparql.xyz/facade-x/data/>
+PREFIX  i:    <https://www.w3id.org/okn/i/>
+PREFIX  rdfs: <http://www.w3.org/2000/01/rdf-schema#>
+PREFIX  :     <http://example.com/>
+PREFIX wd:       <http://www.wikidata.org/entity/>
+prefix dcterms: <http://purl.org/dc/terms/> 
+prefix gist: <https://ontologies.semanticarts.com/gist/>
+prefix schema: <https://schema.org/>
+PREFIX  xsd:  <http://www.w3.org/2001/XMLSchema#>
+CONSTRUCT 
+{ 
+?commit a wd:Q20058545 .
+?commit dcterms:creator ?author .
+?commit gist:atDateTime ?date .
+?commit gist:isIdentifiedBy ?commit_id .
+?commit_id gist:uniqueText ?hash .
+?author gist:name ?name .
+?author schema:email ?email .
+?commit dcterms:subject ?subject .
+?subject dcterms:title ?subject_text .
+?subject dcterms:description ?body_text .
+}
+WHERE
+{ SERVICE <x-sparql-anything:>
+{ fx:properties fx:location  "%s" .
+# TODO should be optionals?
+?s xyz:abbreviated_commit_hash ?hash .
+?s xyz:origin ?origin .
+bind(iri(concat(str(:),"commit/origin=",encode_for_uri(?origin),";commit=",?hash)) as ?commit)
+?s xyz:author_name ?name .
+?s xyz:author_email ?email .
+?s xyz:author_date ?date_string .
+optional {?s xyz:subject ?subject_text }
+optional {?s xyz:body ?body_text }
+bind(bnode() as ?commit_id)
+bind(strdt(?date_string,xsd:dateTime) as ?date)
+#bind(iri(concat(str(:),\"commit/\",?hash)) as ?commit)
+bind(bnode() as ?author)
+bind(bnode() as ?subject)
+}
+}

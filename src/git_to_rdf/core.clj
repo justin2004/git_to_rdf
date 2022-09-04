@@ -5,6 +5,9 @@
   (:require [jsonista.core :as j])
   (:require [progrock.core :as pr]))
 
+; TODO .rq in files, use SA stdout, add cli options
+;       put hunk stuff in a dir, put summary stuff in a dir
+
 ; TODO connecting vulnerabilies (CVEs) to file names / commits / tags / releases
 
 ; TODO model repo itself and edges between adjacent commits
@@ -139,142 +142,13 @@
    (get-commit-summary-maps repo-path pair origin)))
 
 
-
 (defn make-query-for-commit-summary [inputfile]
-  (with-out-str (printf "
-						PREFIX  sd:   <https://w3id.org/okn/o/sd#>
-						PREFIX  fx:   <http://sparql.xyz/facade-x/ns/>
-						PREFIX  rdf:  <http://www.w3.org/1999/02/22-rdf-syntax-ns#>
-						PREFIX  xyz:  <http://sparql.xyz/facade-x/data/>
-						PREFIX  i:    <https://www.w3id.org/okn/i/>
-						PREFIX  rdfs: <http://www.w3.org/2000/01/rdf-schema#>
-						PREFIX  :     <http://example.com/>
-						PREFIX wd:       <http://www.wikidata.org/entity/>
-						prefix dcterms: <http://purl.org/dc/terms/> 
-						prefix gist: <https://ontologies.semanticarts.com/gist/>
-						prefix schema: <https://schema.org/>
-						PREFIX  xsd:  <http://www.w3.org/2001/XMLSchema#>
-						CONSTRUCT 
-						{ 
-						?commit a wd:Q20058545 .
-						?commit dcterms:creator ?author .
-						?commit gist:atDateTime ?date .
-                        ?commit gist:isIdentifiedBy ?commit_id .
-                        ?commit_id gist:uniqueText ?hash .
-						?author gist:name ?name .
-						?author schema:email ?email .
-						?commit dcterms:subject ?subject .
-						?subject dcterms:title ?subject_text .
-						?subject dcterms:description ?body_text .
-						}
-						WHERE
-						{ SERVICE <x-sparql-anything:>
-						{ fx:properties fx:location  \"%s\" .
-						# TODO should be optionals?
-						?s xyz:abbreviated_commit_hash ?hash .
-						?s xyz:origin ?origin .
-                        bind(iri(concat(str(:),\"commit/origin=\",encode_for_uri(?origin),\";commit=\",?hash)) as ?commit)
-						?s xyz:author_name ?name .
-						?s xyz:author_email ?email .
-						?s xyz:author_date ?date_string .
-						optional {?s xyz:subject ?subject_text }
-						optional {?s xyz:body ?body_text }
-                        bind(bnode() as ?commit_id)
-						bind(strdt(?date_string,xsd:dateTime) as ?date)
-						#bind(iri(concat(str(:),\"commit/\",?hash)) as ?commit)
-						bind(bnode() as ?author)
-						bind(bnode() as ?subject)
-						}
-						}
-						"
-						inputfile)))
+  (with-out-str (printf (slurp "queries/commit-summary.rq")
+                        inputfile)))
 
 
 (defn make-query-for-hunk [inputfile]
-  (with-out-str (printf "PREFIX  sd:   <https://w3id.org/okn/o/sd#>
-PREFIX  fx:   <http://sparql.xyz/facade-x/ns/>
-PREFIX  rdf:  <http://www.w3.org/1999/02/22-rdf-syntax-ns#>
-PREFIX  xyz:  <http://sparql.xyz/facade-x/data/>
-PREFIX  i:    <https://www.w3id.org/okn/i/>
-PREFIX  rdfs: <http://www.w3.org/2000/01/rdf-schema#>
-PREFIX  :     <http://example.com/>
-PREFIX wd:       <http://www.wikidata.org/entity/>         # Wikibase entity - item or property. 
-prefix dcterms: <http://purl.org/dc/terms/> 
-prefix gist: <https://ontologies.semanticarts.com/gist/>
-prefix schema: <https://schema.org/>
-PREFIX  xsd:  <http://www.w3.org/2001/XMLSchema#>
-construct {
-?commit gist:hasPart ?hunk .
-#?commit gist:identifiedBy ?commit_id_node .
-#?commit_id_node gist:uniqueText ?hash .
-?hunk a wd:Q113509427 .
-?hunk gist:affects ?old_file_plaintext .
-?old_file_plaintext a wd:Q113515824 . # contiguous lines
-?old_file_plaintext gist:hasMagnitude ?old_source_line_count_mag .
-?old_source_line_count_mag gist:numericValue ?old_source_line_count .
-?old_source_line_count_mag gist:hasUnitOfMeasure gist:_each .
-?old_file_plaintext gist:occursIn ?old_file .
-?old_file gist:name ?old_filename . # TODO name vs path
-?old_file a wd:Q86920 . # text file
-?old_file_plaintext gist:identifiedBy ?old_contiguous_lines_id .
-?old_contiguous_lines_id gist:numericValue ?old_source_start_line_no .
-?old_contiguous_lines_id a wd:Q6553274 . # line number
-?old_file_plaintext :containedTextContainer ?old_content . # TODO predicate
-?old_content ?old_content_p ?old_content_line .
-?hunk gist:produces ?new_file_plaintext .
-?new_file_plaintext gist:occursIn ?new_file .
-?new_file_plaintext a wd:Q113515824 . # contiguous lines
-?new_file_plaintext gist:hasMagnitude ?new_source_line_count_mag .
-?new_source_line_count_mag gist:numericValue ?new_source_line_count .
-?new_source_line_count_mag gist:hasUnitOfMeasure gist:_each .
-?new_file gist:name ?new_filename .
-?new_file a wd:Q86920 . # text file
-?new_file_plaintext gist:identifiedBy ?new_contiguous_lines_id .
-?new_contiguous_lines_id gist:numericValue ?new_source_start_line_no .
-?new_contiguous_lines_id a wd:Q6553274 . # line number
-?new_file_plaintext :containedTextContainer ?new_content . # TODO predicate
-?new_content ?new_content_p ?new_content_line .
-}
-WHERE
-  { SERVICE <x-sparql-anything:>
-      { fx:properties fx:location  \"%s\" .
-# ?s ?p ?o .
-        ?s xyz:commit-id ?hash .
-        ?s xyz:origin ?origin .
-        bind(iri(concat(str(:),\"commit/origin=\",encode_for_uri(?origin),\";commit=\",?hash)) as ?commit)
-        #bind(iri(concat(str(:),\"origin=\",encode_for_uri(?origin),\";commit=\",?hash,\";identifier\")) as ?commit_id_node)
-        #bind(iri(concat(str(:),\"commit_identifier/\",?hash)) as ?commit_id_node)
-        ?s xyz:new_filename ?new_filename .
-        #bind(if(?new_filename=\"/dev/null\",1/0,bnode()) as ?new_file_plaintext)  # only make a contig lines node if the new file
-                                                        # isn't /dev/null
-        bind(bnode() as ?new_file_plaintext)
-        optional{ ?s xyz:new_content ?new_content . 
-                  bind(bnode() as ?new_contiguous_lines_id)
-                  bind(bnode() as ?new_file)
-                  ?s xyz:commit-id ?hash .
-                  ?s xyz:origin ?origin .
-                  bind(iri(concat(str(:),\"hunk/origin=\",encode_for_uri(?origin),\";commit=\",?hash,\";hunk=\",struuid())) as ?hunk) # only bind per hunk not once per hunk line
-                  ?s xyz:new_source_line_count ?new_source_line_count_string .
-                  bind(strdt(?new_source_line_count_string,xsd:integer) as ?new_source_line_count)
-                  bind(bnode() as ?new_source_line_count_mag)
-            optional {?new_content ?new_content_p ?new_content_line .}
-        }
-        ?s xyz:new_source_start_line ?new_source_start_line .
-        bind(strdt(?new_source_start_line,xsd:integer) as ?new_source_start_line_no)
-        optional {?s xyz:old_content ?old_content .
-                  bind(bnode() as ?old_file)
-                  bind(bnode() as ?old_file_plaintext)
-                  bind(bnode() as ?old_contiguous_lines_id)
-                  ?s xyz:old_source_line_count ?old_source_line_count_string .
-                  bind(strdt(?old_source_line_count_string,xsd:integer) as ?old_source_line_count)
-                  bind(bnode() as ?old_source_line_count_mag)
-              {?old_content ?old_content_p ?old_content_line .}
-        }
-        ?s xyz:old_filename ?old_filename .
-        ?s xyz:old_source_start_line ?old_source_start_line .
-        bind(strdt(?old_source_start_line,xsd:integer) as ?old_source_start_line_no)
-      }
-  }" inputfile)))
+  (with-out-str (printf (slurp "queries/hunk.rq") inputfile)))
 
 
 
@@ -426,13 +300,10 @@ WHERE
       origin-string)))
 
 
-; TODO throw error if splitpatch is not installed
-
-
 ;;;;;;;;;;;;;;;;;;;;;
 ; (def path "sparql.anything")
 ; (def path "curl")
-; (def path "one_ea")
+(def path "one_ea")
 (def path "/mnt/gist")
 (def path  "/mnta/rdf_stuff/curl")
 ; (clojure.pprint/pprint (file-seq (clojure.java.io/file "/mnta/rdf_stuff/curl")))
