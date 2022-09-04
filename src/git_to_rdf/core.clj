@@ -5,7 +5,13 @@
   (:require [jsonista.core :as j])
   (:require [progrock.core :as pr]))
 
-; TODO don't have a way to identify the same hunk on different runs of this tool
+; TODO connecting vulnerabilies (CVEs) to file names / commits / tags / releases
+
+; TODO model repo itself and edges between adjacent commits
+
+; TODO /dev/null is semantically opaque
+
+;  TODO don't have a way to identify the same hunk on different runs of this tool
 
 ; TODO need to escape header and body and then get them
 ;     also author can have comma in it
@@ -47,10 +53,14 @@
 ; get-commit-hash-pairs  repo
 ; TODO where is this used?
 (defn get-commit-hash-pairs [repo-path]
-  (csv-data->maps (csv/read-csv (:out (clojure.java.shell/sh "bash" "-c" (str "echo 'abbreviated_commit_hash' ; "
-                                        "git -C "
-                                        repo-path
-                                        " --no-pager log --date=local --pretty=%h"))))))
+  (csv-data->maps
+   (csv/read-csv
+    (:out
+     (clojure.java.shell/sh
+      "bash" "-c" (str "echo 'abbreviated_commit_hash' ; "
+                       "git -C "
+                       repo-path
+                       " --no-pager log --date=local --pretty=%h"))))))
 
 
 (defn get-hash-pairs [path]
@@ -81,21 +91,26 @@
 
 ; TODO use hash/commitid consistently
 
+; (csv/read-csv "bob|fred|joe|jim\n\"1\" was her name|2||88"
+;               :separator \|
+;               :quote \⍕)
 
-; TODO if any of the summary fields contain ⍎ then this will break
+; TODO if any of the summary fields contain ⍎ (or ⍕) then this will break
 (defn get-commit-summary-maps [repo-path pair origin]
   (let [bigmap (first ; first because there is only 1 csv row per commit summary
-                 (csv-data->maps
-                (csv/read-csv
-                 (:out
-                  (clojure.java.shell/sh "bash" "-c" (str "echo 'abbreviated_commit_hash⍎author_name⍎author_email⍎author_date⍎subject' ; "
-                                                          "git -C " 
-                                                          repo-path
+                (csv-data->maps
+                 (csv/read-csv
+                  (:out
+                   (clojure.java.shell/sh
+                    "bash" "-c" (str "echo 'abbreviated_commit_hash⍎author_name⍎author_email⍎author_date⍎subject' ; "
+                                     "git -C "
+                                     repo-path
                                                           ; " --no-pager log --date=local --pretty=%h,%an,%ae,%aI,'%s' "
-                                                          " --no-pager log --date=local --pretty='%h⍎%an⍎%ae⍎%aI⍎%s'"
-                                                          " -1 "
-                                                          (second pair))))
-                  :separator \⍎)))]
+                                     " --no-pager log --date=local --pretty='%h⍎%an⍎%ae⍎%aI⍎%s'"
+                                     " -1 "
+                                     (second pair))))
+                  :separator \⍎
+                  :quote \⍕)))]
     (assoc bigmap
            :origin origin
            :body (get-commit-body repo-path pair))))
@@ -105,12 +120,13 @@
 
 (defn get-diff-content [repo-path pair]
   "pair -- pair of commit ids"
-  (clojure.java.shell/sh "bash" "-c" (str "git -C "
-                                          repo-path
-                                          " --no-pager diff "
-                                          (first pair)
-                                          " "
-                                          (second pair))))
+  (clojure.java.shell/sh 
+   "bash" "-c" (str "git -C "
+                    repo-path
+                    " --no-pager diff "
+                    (first pair)
+                    " "
+                    (second pair))))
 
 
 ; (filter #(= "188c627" (second %))  (get-hash-pairs "sparql.anything"))
@@ -157,7 +173,7 @@
 						# TODO should be optionals?
 						?s xyz:abbreviated_commit_hash ?hash .
 						?s xyz:origin ?origin .
-                        bind(iri(concat(str(:),\"origin=\",encode_for_uri(?origin),\";commit=\",?hash)) as ?commit)
+                        bind(iri(concat(str(:),\"commit/origin=\",encode_for_uri(?origin),\";commit=\",?hash)) as ?commit)
 						?s xyz:author_name ?name .
 						?s xyz:author_email ?email .
 						?s xyz:author_date ?date_string .
@@ -225,7 +241,7 @@ WHERE
 # ?s ?p ?o .
         ?s xyz:commit-id ?hash .
         ?s xyz:origin ?origin .
-        bind(iri(concat(str(:),\"origin=\",encode_for_uri(?origin),\";commit=\",?hash)) as ?commit)
+        bind(iri(concat(str(:),\"commit/origin=\",encode_for_uri(?origin),\";commit=\",?hash)) as ?commit)
         #bind(iri(concat(str(:),\"origin=\",encode_for_uri(?origin),\";commit=\",?hash,\";identifier\")) as ?commit_id_node)
         #bind(iri(concat(str(:),\"commit_identifier/\",?hash)) as ?commit_id_node)
         ?s xyz:new_filename ?new_filename .
@@ -237,7 +253,7 @@ WHERE
                   bind(bnode() as ?new_file)
                   ?s xyz:commit-id ?hash .
                   ?s xyz:origin ?origin .
-                  bind(iri(concat(str(:),\"origin=\",encode_for_uri(?origin),\";commit=\",?hash,\";hunk=\",struuid())) as ?hunk) # only bind per hunk not once per hunk line
+                  bind(iri(concat(str(:),\"hunk/origin=\",encode_for_uri(?origin),\";commit=\",?hash,\";hunk=\",struuid())) as ?hunk) # only bind per hunk not once per hunk line
                   ?s xyz:new_source_line_count ?new_source_line_count_string .
                   bind(strdt(?new_source_line_count_string,xsd:integer) as ?new_source_line_count)
                   bind(bnode() as ?new_source_line_count_mag)
@@ -260,33 +276,6 @@ WHERE
       }
   }" inputfile)))
 
-(defn make-query-for-commit-content [inputfile]
-  (with-out-str (printf "
-                        PREFIX  :     <http://example.com/>
-                        PREFIX  owl:  <http://www.w3.org/2002/07/owl#>
-                        PREFIX  xyz:  <http://sparql.xyz/facade-x/data/>
-                        PREFIX  rdf:  <http://www.w3.org/1999/02/22-rdf-syntax-ns#>
-						prefix gist: <https://ontologies.semanticarts.com/gist/>
-                        PREFIX  fx:   <http://sparql.xyz/facade-x/ns/>
-                        prefix wd: <http://www.wikidata.org/entity/>
-                        construct {
-                        ?content a :ContentExpression ;
-                                 gist:connectedTo wd:Q29465391 ;
-                                 ?patch_line_pred ?line .
-                        }
-                        where 
-                        {
-                        service <x-sparql-anything:> {
-                        fx:properties fx:location \"%s\" .
-                        ?s xyz:abbreviated_commit_hash ?hash .
-                        ?s xyz:out_split/(!<>) ?o .
-                        ?o ?pred ?line .
-                        # split pred line  ----
-                        bind(iri(concat(str(:),\"commit_content/\",?hash)) as ?content)
-                        bind(replace(str(?pred),str(xyz:),\"\") as ?pln) .
-                        bind(iri(concat(str(rdf:),\"_\",?pln)) as ?patch_line_pred) }}"
-                        inputfile))
-  )
 
 
 (defn run-sa-construct [query outputfile]
@@ -443,12 +432,13 @@ WHERE
 ;;;;;;;;;;;;;;;;;;;;;
 ; (def path "sparql.anything")
 ; (def path "curl")
-(def path "one_ea")
-; (def path  "/mnta/rdf_stuff/curl")
-(clojure.pprint/pprint (file-seq (clojure.java.io/file "/mnta/rdf_stuff/curl")))
+; (def path "one_ea")
+(def path "/mnt/gist")
+(def path  "/mnta/rdf_stuff/curl")
+; (clojure.pprint/pprint (file-seq (clojure.java.io/file "/mnta/rdf_stuff/curl")))
 ; (def path "jw")
 ; (clojure.java.io/delete-file "finalout.nq")
-(time (let [output-dir "/mnt/" ; "/mnta/rdf_stuff/curl_rdf/"
+(comment (def f0 (future (time (let [output-dir "/mnt/" ; "/mnta/rdf_stuff/curl_rdf/"
             hash-pairs (get-hash-pairs path)
             total-hash-pairs (count hash-pairs)
             origin-raw (get-repo-origin path)
@@ -470,7 +460,7 @@ WHERE
               (if (= 0 (mod idx 20)); every 20 commits do a tick update
                 (pr/print (pr/tick bar (* 100 (/ idx total-hash-pairs))))
                 ) 
-              ; (printf "working on hash: %s\n" (last pair))
+              (printf "working on hash: %s\n" (last pair))
               (comment (spit input (j/write-value-as-string
                                     (assoc (let [fullmap (get-diff-content path
                                                                            pair)
@@ -484,8 +474,6 @@ WHERE
                                                             :out)
                                                     "out_split" b))
                                            :abbreviated_commit_hash (last pair)))))
-              (comment (run-sa-construct (make-query-for-commit-content input)
-                                         "/mnt/finalout.nq"))
               (spit input (get-commit-summary path
                                               pair
                                               origin))
@@ -502,8 +490,18 @@ WHERE
               ; (printf "%s\n" "doing hunks on ")
               ; (printf "%s\n" (slurp input))
               (run-sa-construct (make-query-for-hunk input)
-                                (str output-dir "finalout_hunks.nq")))))))
+                                (str output-dir "finalout_hunks.nq"))))))))))
 
 
 
+(comment (clojure.pprint/pprint *e))
 
+(comment (clojure.pprint/pprint f0))
+(comment (future-cancel f0))
+;;;;
+
+; (def ds (org.apache.jena.tdb2.TDB2Factory/connectDataset
+;                   "/tmp/la1"))
+
+; (with-txn ds
+;   (print (.getUnionGraph (.asDatasetGraph ds))))
