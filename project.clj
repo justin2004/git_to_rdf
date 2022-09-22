@@ -9,6 +9,12 @@
                  [org.clojure/data.json "2.4.0"]
                  [progrock "0.1.2"]
                  [metosin/jsonista "0.3.5"]
+                 [org.clojure/tools.cli "1.0.206"]
                  ]
-  :resource-paths ["sparql-anything-0.8.0-SNAPSHOT.jar" "."]
+  :main git-to-rdf.core
+  :uberjar {:aot [git-to-rdf.core]}
+  ; :clean-targets ^{:protect false} [...targets...]
+  :clean-targets ^{:protect false} ["/mnt/target"]
+  :jvm-opts ["-Dorg.slf4j.simpleLogger.logFile=SPARQLAnything.log"]
+  :resource-paths ["sparql-anything-0.8.0-SNAPSHOT.jar"]
   :repl-options {:init-ns git-to-rdf.core})

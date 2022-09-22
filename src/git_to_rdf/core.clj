@@ -1,12 +1,25 @@
 (ns git-to-rdf.core
+  (:gen-class)
   (:require [clojure.data.json :as json])
+  (:require [clojure.java.shell :as sh])
+  (:require [clojure.tools.cli :as cli])
   (:require [clojure.data.csv :as csv])
-  (:require [jsonista.core :as j])
   (:require [jsonista.core :as j])
   (:require [progrock.core :as pr]))
 
-; TODO  add cli options
-;       put hunk stuff in a dir, put summary stuff in a dir
+(defmacro dolog [& printfbody]
+  `(spit "SPARQLAnything.log" (with-out-str (printf ~@printfbody))
+         :append true))
+
+(def cli-options
+  [["-r" "--repository PATH" "absolute path to git repository"
+    :validate [#(.exists (clojure.java.io/as-file %)) "must be a path that exists"]
+    ]
+   ["-o" "--output PATH" "absolute path where the output should be saved"
+    :validate [#(.exists (clojure.java.io/as-file %)) "must be a path that exists"]]]
+  )
+
+
 
 ; TODO connecting vulnerabilies (CVEs) to file names / commits / tags / releases
 
@@ -22,10 +35,8 @@
 ; TODO use more URIs to reduce quad count (e.g. for IDs)
 
 (defn installed? [cmd]
-  (= 0 (:exit (clojure.java.shell/sh "bash" "-c" (str "command -V " cmd)))))
+  (= 0 (:exit (sh/sh "bash" "-c" (str "command -V " cmd)))))
 
-(if (not (installed? "splitpatch"))
-  (throw (Exception. "ERROR: splitpatch is not installed")))
 
 (defmacro with-txn [dataset & body] 
   `(try
@@ -59,7 +70,7 @@
   (csv-data->maps
    (csv/read-csv
     (:out
-     (clojure.java.shell/sh
+     (sh/sh
       "bash" "-c" (str "echo 'abbreviated_commit_hash' ; "
                        "git -C "
                        repo-path
@@ -82,7 +93,7 @@
 (defn get-commit-body [repo-path pair]
   (let [result (clojure.string/trim
                 (:out
-                 (clojure.java.shell/sh 
+                 (sh/sh 
                   "bash" "-c" (str "git -C " 
                                    repo-path
                                    " --no-pager log --date=local --pretty=%b "
@@ -104,7 +115,7 @@
                 (csv-data->maps
                  (csv/read-csv
                   (:out
-                   (clojure.java.shell/sh
+                   (sh/sh
                     "bash" "-c" (str "echo 'abbreviated_commit_hash⍎author_name⍎author_email⍎author_date⍎subject' ; "
                                      "git -C "
                                      repo-path
@@ -123,7 +134,7 @@
 
 (defn get-diff-content [repo-path pair]
   "pair -- pair of commit ids"
-  (clojure.java.shell/sh 
+  (sh/sh 
    "bash" "-c" (str "git -C "
                     repo-path
                     " --no-pager diff "
@@ -148,17 +159,18 @@
 
 
 (defn make-query-for-hunk [inputfile]
-  (with-out-str (printf (slurp "queries/hunk.rq") inputfile)))
+  (with-out-str (printf (slurp "queries/hunk.rq") 
+                        inputfile)))
 
 
 (defn change-system-out []
   (let [so (java.lang.System/out) ; TODO restore it?
-        out-buffer (new java.io.ByteArrayOutputStream)])
-  (java.lang.System/setOut (new java.io.PrintStream 
-                                out-buffer
-                                true
-                                "UTF-8"))
-  out-buffer) 
+        out-buffer (new java.io.ByteArrayOutputStream)]
+    (java.lang.System/setOut (new java.io.PrintStream 
+                                  out-buffer
+                                  true
+                                  "UTF-8"))
+    out-buffer))
 
 (defn run-sa-construct [query outputfile buffer]
   (do
@@ -237,9 +249,9 @@
     ;         (second pair)
     ;         (last pair))
     (clojure.java.io/delete-file "a.patch" true)
-    (clojure.java.shell/sh "bash" "-c" "rm -rf hunks")
+    (sh/sh "bash" "-c" "rm -rf hunks")
     (.mkdir (clojure.java.io/file "hunks"))
-    (clojure.java.shell/sh "bash" "-c" (str "git -C "
+    (sh/sh "bash" "-c" (str "git -C "
                                             repopath
                                             " diff -U0 "
                                             (first pair)
@@ -247,7 +259,7 @@
                                             (second pair)
                                             " > a.patch"))
     ; TODO splitpatch ignores chmods
-    (clojure.java.shell/sh "bash" "-c" "cd /mnt/hunks ; splitpatch -H ../a.patch")
+    (sh/sh "bash" "-c" "cd /mnt/hunks ; splitpatch -H ../a.patch")
     ; (doseq [hunk (filter #(.isFile %) (file-seq (clojure.java.io/file "hunks")))]
     ;       (clojure.pprint/pprint (assoc (raw-hunk->map (.getPath hunk))
     ;                                     :commit-id (last pair))))
@@ -256,7 +268,7 @@
                                 :origin origin)
                         (filter #(.isFile %)
                                 (file-seq (clojure.java.io/file "hunks"))))]
-      (clojure.java.shell/sh "bash" "-c" "rm -rf hunks/*")
+      (sh/sh "bash" "-c" "rm -rf hunks/*")
       (j/write-value-as-string result))))
 
 
@@ -300,7 +312,7 @@
 
 (defn get-repo-origin [repopath]
   (let [origin-string (clojure.string/trim (:out
-                        (clojure.java.shell/sh
+                        (sh/sh
                          "bash" "-c"
                          (str "git -C "
                               repopath
@@ -309,22 +321,22 @@
       nil
       origin-string)))
 
+; (sh/sh "bash" "-c" "echo hi")
 
 ;;;;;;;;;;;;;;;;;;;;;
 ; (def path "sparql.anything")
 ; (def path "curl")
-(def path "one_ea")
-(def path "/mnt/gist")
-(def path  "/mnta/rdf_stuff/curl")
+; (def path "one_ea")
+; (def path "/mnt/gist")
+; (def path  "/mnta/rdf_stuff/curl")
 ; (clojure.pprint/pprint (file-seq (clojure.java.io/file "/mnta/rdf_stuff/curl")))
 ; (def path "jw")
 ; (clojure.java.io/delete-file "finalout.nq")
-(comment
-  (def f0
-    (future
-      (time
-       (let [buffer (change-system-out)
-             output-dir "/mnt/" ; "/mnta/rdf_stuff/curl_rdf/"
+
+(defn doit [path output-dir]
+  (let [ summaries-filename "summaries.nq"    
+         hunks-filename "hunks.nq"
+        buffer (change-system-out)
              hash-pairs (get-hash-pairs path)
              total-hash-pairs (count hash-pairs)
              origin-raw (get-repo-origin path)
@@ -332,9 +344,9 @@
                       (.toString (java.util.UUID/randomUUID))
                       origin-raw)
              bar (pr/progress-bar 100)
-             _ (try (clojure.java.io/delete-file (str output-dir "finalout_summary.nq")) ; TODO put in 1 place
+             _ (try (clojure.java.io/delete-file (str output-dir "/" summaries-filename))
                     (catch Exception e))
-             _ (try (clojure.java.io/delete-file (str output-dir "finalout_hunks.nq"))
+             _ (try (clojure.java.io/delete-file (str output-dir "/" hunks-filename))
                     (catch Exception e))
              ]
          (doseq [[pair idx] (map list hash-pairs
@@ -343,49 +355,30 @@
                             (print-str (apply str (interpose "-" pair)))
                             ".json")]
              (do
-               (if (= 0 (mod idx 20)); every 20 commits do a tick update
+               (if (= 0 (mod idx 2)); every 2 commits do a tick update
                  (pr/print (pr/tick bar (* 100 (/ idx total-hash-pairs))))
                  ) 
-               (printf "working on hash: %s\n" (last pair))
-               (comment (spit input (j/write-value-as-string
-                                     (assoc (let [fullmap (get-diff-content path
-                                                                            pair)
-                                                  out (:out fullmap)
-                                                  a (clojure.string/split-lines out)
-                                                  b (mapv (fn [a b]
-                                                            {a b})
-                                                          (range (count a))
-                                                          a)]
-                                              (assoc (dissoc fullmap
-                                                             :out)
-                                                     "out_split" b))
-                                            :abbreviated_commit_hash (last pair)))))
-               (spit input (get-commit-summary path
-                                               pair
-                                               origin))
-               ; (printf "on idx %s\n" idx)
-               ; (printf "pair is %s\n" pair)
-               ; (printf "%s -- %s\n" "sec pair" (second pair))
-               ; (printf "%s\n" "doing summary on ")
-               ; (printf "%s\n" (slurp input))
-               ; (printf "%s\n" "done")
+               (dolog "working on hash: %s\n" (last pair))
+               (spit input (get-commit-summary path pair origin))
+               ; (dolog "on idx %s\n" idx)
+               ; (dolog "pair is %s\n" pair)
+               ; (dolog "%s -- %s\n" "sec pair" (second pair))
+               (dolog "%s\n" "doing summary on ")
+               (dolog "%s\n" (slurp input))
+               (dolog "%s\n" "done")
                (run-sa-construct (make-query-for-commit-summary input)
-                                 (str output-dir "finalout_summary.nq")
+                                 (str output-dir "/" summaries-filename)
                                  buffer)
                (spit input (do-hunks path pair origin))
                ; (printf "path:%s\n" path)
-               ; (printf "%s\n" "doing hunks on ")
-               ; (printf "%s\n" (slurp input))
+               (dolog "%s\n" "doing hunks on ")
+               (dolog "%s\n" (slurp input))
                (run-sa-construct (make-query-for-hunk input)
-                                 (str output-dir "finalout_hunks.nq")
-                                 buffer)))))))))
+                                 (str output-dir "/" hunks-filename)
+                                 buffer))))
+    (pr/print (pr/done bar))))
 
 
-
-(comment (clojure.pprint/pprint *e))
-
-(comment (clojure.pprint/pprint f0))
-(comment (future-cancel f0))
 ;;;;
 
 ; (def ds (org.apache.jena.tdb2.TDB2Factory/connectDataset
@@ -393,3 +386,29 @@
 
 ; (with-txn ds
 ;   (print (.getUnionGraph (.asDatasetGraph ds))))
+
+
+
+; (defn doit [path output-dir]
+; (print (cli/parse-opts args cli-options))
+
+; (doit "/mnt/one_ea/" "/mnt/")
+
+(defn -main [& args]
+  (let [_ (if (not (installed? "splitpatch"))
+            (throw (Exception. "ERROR: splitpatch is not installed")))
+        opts (cli/parse-opts args cli-options)
+        _ (dolog "opts are: %s" (with-out-str (clojure.pprint/pprint opts)))
+        r (:repository (:options opts))
+        _ (if (or (not (nil? (:errors opts)))
+                  (nil? (or (:repository (:options opts))
+                            (:output (:options opts)))))
+            (do
+              (if (not (nil? (:errors opts)))
+                (.println java.lang.System/err (:errors opts)))
+              (.println java.lang.System/err (:summary opts))
+              (java.lang.System/exit 1)))]
+    (doit (:repository (:options opts))
+          (:output (:options opts))))
+  (java.lang.System/exit 0))
+
