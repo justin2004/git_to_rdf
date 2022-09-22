@@ -16,7 +16,7 @@ Say you cloned this git repo to `/home/alice/repo/git_to_rdf`, your git reposito
 0) in a `bash` shell run: `make build`
 0) cd to `/home/alice/`
 0) in a `bash` shell run: `/home/alice/repo/git_to_rdf/git_to_rdf.sh --repository /mnt/repo/projX --output /mnt/RDF`
-0) find your 3 output files at `/home/alice/RDF`
+0) find your 3 output files at `/home/alice/RDF`: `summaries.nq` `hunks.nq` and the log file `git_to_rdf.log`
 
 
 ## notes
