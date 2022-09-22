@@ -18,4 +18,18 @@ ENV LANG en_US.UTF-8
 ENV LANGUAGE en_US:en
 ENV LC_ALL en_US.UTF-8
 
+WORKDIR /app
+
+ADD queries/ /app/queries/
+ADD project.clj /app/
+ADD src/git_to_rdf/ /app/src/git_to_rdf/
+ADD sparql-anything-0.8.0.jar /app/
+USER root
+RUN chmod -R 777 /app/
+USER $user
+
+WORKDIR /app
+
+RUN lein uberjar
+
 WORKDIR /mnt

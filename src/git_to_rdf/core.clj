@@ -157,13 +157,14 @@
    (get-commit-summary-maps repo-path pair origin)))
 
 
+; TODO put the queries in the jar
 (defn make-query-for-commit-summary [inputfile]
-  (with-out-str (printf (slurp "queries/commit-summary.rq")
+  (with-out-str (printf (slurp "/app/queries/commit-summary.rq")
                         inputfile)))
 
 
 (defn make-query-for-hunk [inputfile]
-  (with-out-str (printf (slurp "queries/hunk.rq") 
+  (with-out-str (printf (slurp "/app/queries/hunk.rq") 
                         inputfile)))
 
 
@@ -359,7 +360,7 @@
                             (print-str (apply str (interpose "-" pair)))
                             ".json")]
              (do
-               (if (= 0 (mod idx 2)); every 2 commits do a tick update
+               (if (= 0 (mod idx 20)); every 20 commits do a tick update
                  (pr/print (pr/tick bar (* 100 (/ idx total-hash-pairs))))
                  ) 
                ; (dolog "working on hash: %s\n" (last pair))
