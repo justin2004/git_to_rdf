@@ -8,14 +8,18 @@
   (:require [progrock.core :as pr]))
 
 (defmacro dolog [& printfbody]
-  `(spit "SPARQLAnything.log" (with-out-str (printf ~@printfbody))
+  `(spit "git_to_rdf.log" (with-out-str (printf ~@printfbody))
          :append true))
 
 (def cli-options
   [["-r" "--repository PATH" "absolute path to git repository"
     :validate [#(.exists (clojure.java.io/as-file %)) "must be a path that exists"]
     ]
-   ["-o" "--output PATH" "absolute path where the output should be saved"
+   ["-o" "--output PATH" "absolute path where the output should be saved. 
+                         NOTE: the utility will output three files there:
+                         summaries.nq
+                         hunks.nq
+                         git_to_rdf.log"
     :validate [#(.exists (clojure.java.io/as-file %)) "must be a path that exists"]]]
   )
 
@@ -248,18 +252,18 @@
     ; (printf "in do-hunks. first pair:%s, secondpair:%s, lastpair:%s\n" (first pair)
     ;         (second pair)
     ;         (last pair))
-    (clojure.java.io/delete-file "a.patch" true)
-    (sh/sh "bash" "-c" "rm -rf hunks")
-    (.mkdir (clojure.java.io/file "hunks"))
+    (clojure.java.io/delete-file "/tmp/a.patch" true)
+    (sh/sh "bash" "-c" "rm -rf /tmp/hunks")
+    (.mkdir (clojure.java.io/file "/tmp/hunks"))
     (sh/sh "bash" "-c" (str "git -C "
                                             repopath
                                             " diff -U0 "
                                             (first pair)
                                             " "
                                             (second pair)
-                                            " > a.patch"))
+                                            " > /tmp/a.patch"))
     ; TODO splitpatch ignores chmods
-    (sh/sh "bash" "-c" "cd /mnt/hunks ; splitpatch -H ../a.patch")
+    (sh/sh "bash" "-c" "cd /tmp/hunks ; splitpatch -H /tmp/a.patch")
     ; (doseq [hunk (filter #(.isFile %) (file-seq (clojure.java.io/file "hunks")))]
     ;       (clojure.pprint/pprint (assoc (raw-hunk->map (.getPath hunk))
     ;                                     :commit-id (last pair))))
@@ -267,8 +271,8 @@
                                 :commit-id (last pair)
                                 :origin origin)
                         (filter #(.isFile %)
-                                (file-seq (clojure.java.io/file "hunks"))))]
-      (sh/sh "bash" "-c" "rm -rf hunks/*")
+                                (file-seq (clojure.java.io/file "/tmp/hunks"))))]
+      (sh/sh "bash" "-c" "rm -rf /tmp/hunks/*")
       (j/write-value-as-string result))))
 
 
@@ -358,21 +362,21 @@
                (if (= 0 (mod idx 2)); every 2 commits do a tick update
                  (pr/print (pr/tick bar (* 100 (/ idx total-hash-pairs))))
                  ) 
-               (dolog "working on hash: %s\n" (last pair))
+               ; (dolog "working on hash: %s\n" (last pair))
                (spit input (get-commit-summary path pair origin))
                ; (dolog "on idx %s\n" idx)
                ; (dolog "pair is %s\n" pair)
                ; (dolog "%s -- %s\n" "sec pair" (second pair))
-               (dolog "%s\n" "doing summary on ")
-               (dolog "%s\n" (slurp input))
-               (dolog "%s\n" "done")
+               ; (dolog "%s\n" "doing summary on ")
+               ; (dolog "%s\n" (slurp input))
+               ; (dolog "%s\n" "done")
                (run-sa-construct (make-query-for-commit-summary input)
                                  (str output-dir "/" summaries-filename)
                                  buffer)
                (spit input (do-hunks path pair origin))
                ; (printf "path:%s\n" path)
-               (dolog "%s\n" "doing hunks on ")
-               (dolog "%s\n" (slurp input))
+               ; (dolog "%s\n" "doing hunks on ")
+               ; (dolog "%s\n" (slurp input))
                (run-sa-construct (make-query-for-hunk input)
                                  (str output-dir "/" hunks-filename)
                                  buffer))))
@@ -401,8 +405,8 @@
         _ (dolog "opts are: %s" (with-out-str (clojure.pprint/pprint opts)))
         r (:repository (:options opts))
         _ (if (or (not (nil? (:errors opts)))
-                  (nil? (or (:repository (:options opts))
-                            (:output (:options opts)))))
+                  (or (nil? (:repository (:options opts)))
+                            (nil? (:output (:options opts)))))
             (do
               (if (not (nil? (:errors opts)))
                 (.println java.lang.System/err (:errors opts)))
