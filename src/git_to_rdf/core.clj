@@ -27,6 +27,8 @@
 
 ; TODO connecting vulnerabilies (CVEs) to file names / commits / tags / releases
 
+; TODO connect commits to parent commit
+
 ; TODO model repo itself and edges between adjacent commits
 
 ; TODO /dev/null is semantically opaque
