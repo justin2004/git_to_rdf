@@ -22,7 +22,7 @@ Now use the Docker image .
 
 0) cd to `/home/alice/`
 0) in a `bash` shell run: `/home/alice/repo/git_to_rdf/git_to_rdf.sh --repository /mnt/repo/projX --output /mnt/RDF`
-0) find your 2 output files at `/home/alice/RDF`: `summaries.nq` `hunks.nq` and the log file `git_to_rdf.log` in your current directory.
+0) find your 2 output files `summaries.nq` and `hunks.nq` at `/home/alice/RDF` and the log file `git_to_rdf.log` in your current directory.
 
 
 # speed
