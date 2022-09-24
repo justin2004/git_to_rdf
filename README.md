@@ -10,13 +10,18 @@ I've [blogged](https://github.com/justin2004/weblog/tree/master/git_repo_as_rdf#
 
 Say you cloned this git repo to `/home/alice/repo/git_to_rdf`, your git repository of interest is at `/home/alice/repo/projX`, and you want to put the produced RDF at `/home/alice/RDF`
 
+First build the Docker image.
+
 0) have [Docker](https://docs.docker.com/engine/install/) installed
 0) have `make` and `wget` installed
 0) cd to `/home/alice/repo/git_to_rdf`
 0) in a `bash` shell run: `make build`
+
+Now use the Docker image .
+
 0) cd to `/home/alice/`
 0) in a `bash` shell run: `/home/alice/repo/git_to_rdf/git_to_rdf.sh --repository /mnt/repo/projX --output /mnt/RDF`
-0) find your 3 output files at `/home/alice/RDF`: `summaries.nq` `hunks.nq` and the log file `git_to_rdf.log`
+0) find your 2 output files at `/home/alice/RDF`: `summaries.nq` `hunks.nq` and the log file in your current directory: `git_to_rdf.log`
 
 
 ## notes
