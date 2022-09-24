@@ -2,13 +2,14 @@
 
 ## what
 A utility (that runs in a Docker container) that transforms a git repository on disk into RDF.
+It uses [SPARQL Anything](https://github.com/SPARQL-Anything/sparql.anything) to transform the intermediate csv and json git repository representations into RDF using SPARQL construct queries.
 
 ## why
-I've [blogged](https://github.com/justin2004/weblog/tree/master/git_repo_as_rdf#readme) about some of the reasons you might want to view a git repository as RDF.
+I've [blogged](https://github.com/justin2004/weblog/tree/master/git_repo_as_rdf#readme) about using this tool to view a git repository as RDF.
 
 ## how
 
-Say you cloned this git repo to `/home/alice/repo/git_to_rdf`, your git repository of interest is at `/home/alice/repo/projX`, and you want to put the produced RDF at `/home/alice/RDF`
+Say you cloned this git repo to `/home/alice/repo/git_to_rdf`, your git repository of interest is at `/home/alice/repo/projX`, and you want to put the RDF this tool produces at `/home/alice/RDF`
 
 First build the Docker image.
 
@@ -21,7 +22,13 @@ Now use the Docker image .
 
 0) cd to `/home/alice/`
 0) in a `bash` shell run: `/home/alice/repo/git_to_rdf/git_to_rdf.sh --repository /mnt/repo/projX --output /mnt/RDF`
-0) find your 2 output files at `/home/alice/RDF`: `summaries.nq` `hunks.nq` and the log file in your current directory: `git_to_rdf.log`
+0) find your 2 output files at `/home/alice/RDF`: `summaries.nq` `hunks.nq` and the log file `git_to_rdf.log` in your current directory.
+
+
+# speed
+
+It took 6 minutes to transform [this](https://github.com/SPARQL-Anything/sparql.anything) git repository (consisting of 1,122 commits) into 2,207,235 triples.
+
 
 
 ## notes
