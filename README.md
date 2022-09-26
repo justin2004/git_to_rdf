@@ -25,7 +25,7 @@ Now use the Docker image .
 0) find your 2 output files `summaries.nq` and `hunks.nq` at `/home/alice/RDF` and the log file `git_to_rdf.log` in your current directory.
 
 
-# speed
+## speed
 
 It took 6 minutes to transform [this](https://github.com/SPARQL-Anything/sparql.anything) git repository (consisting of 1,122 commits) into 2,207,235 triples.
 
